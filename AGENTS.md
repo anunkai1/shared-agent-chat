@@ -1,3 +1,21 @@
+# Shared Agent Chat fork
+
+## Fork-specific rules
+
+- Read `project/PLAN.md`, `project/STATUS.md`, `project/UPSTREAM.md` and `SECURITY.md` before changing this fork. They define the owner-approved scope and verified status.
+- Keep the original licence, copyright notices and history. This is an independently maintained Alook fork; do not imply upstream endorsement or describe planned permissions as implemented.
+- Keep public documentation portable. Do not publish private host topology, personal information, runtime data, credentials or internal operational notes.
+- Durable credentials belong in the deployment owner's canonical secret store, never Git, process arguments, logs or broad runner mounts. Follow the host's inherited AGENTS.md and owning deployment/secret workflows.
+- Do not modify or expose an existing privileged personal agent environment for the proof of concept. Use synthetic identities and independently restricted runners.
+- Use feature branches and pull requests. Never force-push main or publish unreviewed changes.
+- Inherited release/package/deployment automation below is upstream reference only. It is not authorised for this fork. GitHub Actions remains disabled until workflows are explicitly reviewed/adapted.
+- Do not delegate work unless the owner explicitly authorises delegation. If an upstream instruction calls for an unavailable subagent, perform the relevant authorised checks directly and accurately report coverage; never claim a subagent ran.
+- Keep private implementation plans in ignored `plans/`, but keep the public roadmap and verified progress in tracked `project/`. Label mocks, source inspection and emulation separately from end-to-end results.
+
+## Inherited upstream guidance
+
+The remaining sections describe Alook's development conventions. Apply them subject to the fork-specific rules and higher-priority host instructions above.
+
 # Alook
 Alook's main purpose is to make the cli agent always on, and give it a email address.
 

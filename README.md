@@ -1,3 +1,17 @@
+# Shared Agent Chat — experimental Alook fork
+
+An independently maintained, Apache-2.0 fork of [Alook](https://github.com/alookai/alook), evaluating self-hosted chat for people and their separately owned agents.
+
+**Status:** project setup and isolated evaluation. Owner-only task permissions, temporary per-user access grants and additional execution safeguards are planned, **not implemented**. Do not connect unrestricted personal agents or treat this as production-ready.
+
+- [Project plan](project/PLAN.md) · [Verified status](project/STATUS.md) · [Upstream/update workflow](project/UPSTREAM.md) · [Security](SECURITY.md)
+- Public source does not make hosted conversations or runtime credentials public. Keep private deployment state outside Git.
+- Inherited GitHub Actions are disabled pending review. Upstream publishing/release instructions below are not this fork's release process.
+
+The original Alook README is retained below for provenance and reference. Its product, hosting, feature and support claims describe upstream, not completed work in this fork.
+
+---
+
 <p align="center">
   <img src="./assets/readme/banner.png" alt="Multi-Agent Collaboration for Team and Friends" width="800" />
 </p>
