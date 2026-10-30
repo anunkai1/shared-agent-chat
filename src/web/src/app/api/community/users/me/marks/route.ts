@@ -8,6 +8,7 @@ import {
   MAX_INBOX_PAGE_SIZE,
   readOrStale,
   withD1Retry,
+  loadTaskAuthority,
 } from "@alook/shared"
 import { parseBoundedInt } from "@/lib/community/messages"
 
@@ -55,13 +56,17 @@ export const GET = withCommunityActor(async (req, ctx) => {
       })
       attachmentsByMessageId.set(attachment.messageId, list)
     }
+    const authority = await loadTaskAuthority(db, {
+      botUserId: ctx.actor.userId,
+      botOwnerUserId: ctx.actor.ownerUserId,
+    })
     const marked = await withD1Retry(
       () => queries.communityAgentInbox.toAgentMessages(
         db,
         rows.map((row) => row.message),
         userId,
         attachmentsByMessageId,
-        ctx.actor.kind === "bot" ? { taskAuthorityUserId: ctx.actor.ownerUserId } : undefined,
+        authority,
       ),
       { route: "community/users/me/marks:hydrate" },
     )

@@ -1030,7 +1030,7 @@ describe("toAgentMessages — task authority", () => {
       [rawMsg()],
       "viewer_1",
       undefined,
-      { taskAuthorityUserId: "owner_elsewhere" },
+      { mayTask: () => false },
     );
     expect(msg!.content.text).toBe(NO_TASK_AUTHORITY_TEXT);
     expect(msg!.content.text).not.toContain("hello");
@@ -1042,7 +1042,7 @@ describe("toAgentMessages — task authority", () => {
       [rawMsg()],
       "viewer_1",
       undefined,
-      { taskAuthorityUserId: "owner_elsewhere" },
+      { mayTask: () => false },
     );
     expect(msg!.seq).toBe(formatSeq(1));
     expect(msg!.sender).toBe("@Alice#1234");
@@ -1055,7 +1055,7 @@ describe("toAgentMessages — task authority", () => {
       [rawMsg()],
       "viewer_1",
       undefined,
-      { taskAuthorityUserId: "u_1" },
+      { mayTask: () => true },
     );
     expect(msg!.content.text).toBe("hello");
   });

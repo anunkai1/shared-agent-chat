@@ -258,12 +258,13 @@ export async function toAgentMessages(
   viewerId: string,
   attachmentsByMessageId?: Map<string, AgentAttachmentRef[]>,
   /**
-   * Bot-facing reads only. When supplied, a message from anyone other than
-   * `taskAuthorityUserId` keeps its place in the conversation but loses every
-   * piece of actionable content: text, attachments and reply quotes. Being able
-   * to see a room is not authority to obey what was said in it.
+   * Bot-facing reads only. When supplied, a message the bot may not obey keeps
+   * its place in the conversation but loses every piece of actionable content:
+   * text, attachments and reply quotes. Being able to see a room is not
+   * authority to obey what was said in it, and a channel-scoped grant must not
+   * leak into a channel it does not cover.
    */
-  authority?: { taskAuthorityUserId: string | null }
+  authority?: { mayTask(authorId: string, channelId: string): boolean }
 ): Promise<Message[]> {
   if (rows.length === 0) return [];
 
@@ -293,7 +294,7 @@ export async function toAgentMessages(
     // Absent (not empty array) when a message has no attachments — smaller
     // wire payload; documented invariant in the plan.
     const atts = attachmentsByMessageId?.get(r.id);
-    const mayTask = !authority || authority.taskAuthorityUserId === r.authorId;
+    const mayTask = !authority || authority.mayTask(r.authorId, r.channelId);
     const content: MessageContent = { text: mayTask ? r.content : NO_TASK_AUTHORITY_TEXT };
     if (mayTask && atts && atts.length > 0) content.attachments = atts;
     const replyTo = r.replyToId ? replyByMessageId.get(r.replyToId) : undefined;

@@ -1,6 +1,6 @@
 import { flattenError } from "zod"
 import { NextResponse, type NextRequest } from "next/server"
-import { queries, withD1Retry, CommunityAgentInboxPullRequestSchema } from "@alook/shared"
+import { queries, withD1Retry, CommunityAgentInboxPullRequestSchema, loadTaskAuthority } from "@alook/shared"
 import { getDb } from "@/lib/db"
 import { log } from "@/lib/logger"
 import { withCommunityActor, requireBot } from "@/lib/middleware/community-actor"
@@ -101,13 +101,17 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     attachmentsByMessageId.set(a.messageId, list)
   }
 
+  const authority = await loadTaskAuthority(db, {
+    botUserId,
+    botOwnerUserId: gate.bot.ownerUserId,
+  })
   const messages = await withD1Retry(
     () => queries.communityAgentInbox.toAgentMessages(
       db,
       page,
       botUserId,
       attachmentsByMessageId,
-      { taskAuthorityUserId: gate.bot.ownerUserId },
+      authority,
     ),
     { route: "community/users/me/inbox/pull:hydrate" },
   )

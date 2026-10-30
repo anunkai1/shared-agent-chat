@@ -20,6 +20,10 @@ vi.mock("../../src/db/queries/community/bot-audit-log", () => ({
   insertBotAuditWakeTrigger: (...a: unknown[]) => mockInsertBotAuditWakeTrigger(...a),
 }));
 
+vi.mock("../../src/db/queries/community/grant", () => ({
+  listActiveGrantsForBot: async () => [],
+}));
+
 const mockGetUsersByIds = vi.fn();
 vi.mock("../../src/db/queries/user", () => ({
   getUsersByIds: (...a: unknown[]) => mockGetUsersByIds(...a),
