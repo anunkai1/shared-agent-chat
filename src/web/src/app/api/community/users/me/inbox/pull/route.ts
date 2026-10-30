@@ -36,7 +36,7 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     return NextResponse.json({ messages: [], hasMore: false, markedCount: 0 })
   }
 
-  const db = getDb(ctx.env.DB)
+  const db = getDb(ctx.env.DB, "first-primary")
 
   // Body is optional (`InboxPullRequest = { max? }`) — an empty/missing body is
   // equivalent to `{}`, not a 400. Only a body that parses to JSON but fails

@@ -111,7 +111,7 @@ function createCommunityActorHandler(
       }
       const { env } = await getCloudflareContext({ async: true })
       const cloudflareEnv = env as Env
-      const db = getDb(cloudflareEnv.DB)
+      const db = getDb(cloudflareEnv.DB, "first-primary")
 
       const resolved = await resolveBotActor(db, authHeader, {
         allowInactive: options.allowInactiveBot,
@@ -145,7 +145,7 @@ function createCommunityActorHandler(
     const delegated = withAuth(async (r, humanCtx: AuthContext & { params?: Record<string, string> }) => {
       const selectedBotId = r.headers.get(COMMUNITY_BOT_ACTOR_HEADER)
       if (selectedBotId !== null) {
-        const resolved = await resolveOwnedBotActor(getDb(humanCtx.env.DB), selectedBotId, humanCtx.userId, { allowInactive: options.allowInactiveBot })
+        const resolved = await resolveOwnedBotActor(getDb(humanCtx.env.DB, "first-primary"), selectedBotId, humanCtx.userId, { allowInactive: options.allowInactiveBot })
         if (resolved.kind === "error") return resolved.response
         return handler(r, {
           env: humanCtx.env,

@@ -1,9 +1,26 @@
 import { describe, it, expect, vi } from "vitest";
 import { createDb } from "../../src/db";
-import * as agentInbox from "../../src/db/queries/community/agent-inbox";
+import * as agentInboxQueries from "../../src/db/queries/community/agent-inbox";
+
+// Hydration fixtures explicitly allow their sample authors; policy tests supply
+// a different decision. Production callers must always pass a policy.
+const allowFixtureAuthors = { mayTask: () => true };
+const agentInbox = {
+  ...agentInboxQueries,
+  toAgentMessages: (
+    db: Parameters<typeof agentInboxQueries.toAgentMessages>[0],
+    rows: Parameters<typeof agentInboxQueries.toAgentMessages>[1],
+    viewerId: string,
+    attachments?: Parameters<typeof agentInboxQueries.toAgentMessages>[3],
+    authority = allowFixtureAuthors
+  ) => agentInboxQueries.toAgentMessages(db, rows, viewerId, attachments, authority),
+  toAgentMessage: (db: Parameters<typeof agentInboxQueries.toAgentMessage>[0], row: Parameters<typeof agentInboxQueries.toAgentMessage>[1], viewerId: string) =>
+    agentInboxQueries.toAgentMessage(db, row, viewerId, undefined, allowFixtureAuthors),
+};
 import * as marks from "../../src/db/queries/community/mark";
 import { formatRef, formatSeq, DM_SERVER } from "../../src/community-cli-contract";
 import { NO_TASK_AUTHORITY_TEXT } from "../../src/community/task-authority";
+import { communityBotGrant } from "../../src/db/community-grant-schema";
 
 /**
  * Generic chainable + thenable mock. Every builder method (`select`, `from`,
@@ -22,7 +39,7 @@ function createSequentialDb(responses: unknown[][]) {
   let call = 0;
   const methods = ["from", "where", "leftJoin", "innerJoin", "orderBy", "limit", "groupBy", "as"];
   const select = vi.fn((fields: any) => {
-    if (fields?.value) return createDb({} as any).select(fields);
+    if (fields?.value || fields?.ownerUserId || fields?.id === communityBotGrant.id) return createDb({} as any).select(fields);
     const idx = call++;
     const chain: any = {};
     for (const m of methods) chain[m] = vi.fn(() => chain);
@@ -1060,8 +1077,9 @@ describe("toAgentMessages — task authority", () => {
     expect(msg!.content.text).toBe("hello");
   });
 
-  it("is unchanged for callers that pass no authority at all (human-facing reads)", async () => {
-    const [msg] = await agentInbox.toAgentMessages(seed(), [rawMsg()], "viewer_1");
-    expect(msg!.content.text).toBe("hello");
+  it("fails closed for an untyped caller that omits its required policy", async () => {
+    // @ts-expect-error policy is required even when no attachments are present
+    const [msg] = await agentInboxQueries.toAgentMessages(seed(), [rawMsg()], "viewer_1", undefined);
+    expect(msg!.content.text).toBe(NO_TASK_AUTHORITY_TEXT);
   });
 });

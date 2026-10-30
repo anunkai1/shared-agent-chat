@@ -383,12 +383,15 @@ describe("GET /api/community/messages/[id]", () => {
     const res = await GET(botReq("/s/general", "42"), ctxResolve)
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ message: expect.objectContaining({ seq: "#42" }) })
-    expect(mockResolveTargetForMember).toHaveBeenCalledWith(replicaDb, "bot_1", "/s/general", {
+    expect(mockResolveTargetForMember).toHaveBeenCalledWith(primaryDb, "bot_1", "/s/general", {
       createDmIfMissing: false,
       createThreadIfMissing: false,
       callerKind: "bot",
     })
-    expect(mockGetMessageByChannelAndSeq).toHaveBeenCalledWith(replicaDb, { channelId: "c1" }, 42)
+    expect(mockGetMessageByChannelAndSeq).toHaveBeenCalledWith(primaryDb, { channelId: "c1" }, 42)
+    const policy = mockToAgentMessage.mock.calls[0][4]
+    expect(policy.mayTask("o_1", "c1")).toBe(true)
+    expect(policy.mayTask("stranger", "c1")).toBe(false)
   })
 
   it("①-C: bot ref to an UNREACHABLE channel → 404 (member-scoped resolve, not a 403 leak)", async () => {

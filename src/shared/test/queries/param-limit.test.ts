@@ -309,8 +309,8 @@ describe("listUnreadMessagesForAgent bound parameters", () => {
 });
 
 describe("getLatestUnreadMessageForAgent bound parameters", () => {
-  it("87 allowed channels fit exactly at the query's 13-fixed-bind budget", async () => {
-    const channelIds = Array.from({ length: 87 }, (_, index) => `channel_${index}`);
+  it("83 allowed channels fit exactly at the query's 17-fixed-bind budget", async () => {
+    const channelIds = Array.from({ length: 83 }, (_, index) => `channel_${index}`);
     const typeRows = channelIds.map((id) => [id, "text"]);
     const { db, statements } = makeD1Capture([typeRows, []]);
 
@@ -322,12 +322,12 @@ describe("getLatestUnreadMessageForAgent bound parameters", () => {
 
     expect(statements.map(({ params }) => params.filter(
       (value) => typeof value === "string" && value.startsWith("channel_"),
-    ).length)).toEqual([87, 87]);
-    expect(statements.map(({ params }) => params.length)).toEqual([87, 100]);
+    ).length)).toEqual([83, 83]);
+    expect(statements.map(({ params }) => params.length)).toEqual([83, 100]);
   });
 
-  it("88 allowed channels split into 87 + 1 instead of emitting 101 binds", async () => {
-    const channelIds = Array.from({ length: 88 }, (_, index) => `channel_${index}`);
+  it("84 allowed channels split into 83 + 1 instead of emitting 101 binds", async () => {
+    const channelIds = Array.from({ length: 84 }, (_, index) => `channel_${index}`);
     const typeRows = channelIds.map((id) => [id, "text"]);
     const { db, statements } = makeD1Capture([
       typeRows,
@@ -343,8 +343,8 @@ describe("getLatestUnreadMessageForAgent bound parameters", () => {
 
     expect(statements.map(({ params }) => params.filter(
       (value) => typeof value === "string" && value.startsWith("channel_"),
-    ).length)).toEqual([88, 87, 1]);
-    expect(statements.map(({ params }) => params.length)).toEqual([88, 100, 14]);
+    ).length)).toEqual([84, 83, 1]);
+    expect(statements.map(({ params }) => params.length)).toEqual([84, 100, 18]);
     for (const { params } of statements) {
       expect(params.length).toBeLessThanOrEqual(D1_MAX_BIND_PARAMS);
     }

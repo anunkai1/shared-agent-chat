@@ -23,7 +23,7 @@ import { parseBoundedInt } from "@/lib/community/messages"
 // message (a marked message is usually outside the loaded window, so a
 // seq-less scroll would silently no-op).
 export const GET = withCommunityActor(async (req, ctx) => {
-  const db = getDb(ctx.env.DB)
+  const db = getDb(ctx.env.DB, ctx.actor.kind === "bot" ? "first-primary" : "first-unconstrained")
   const userId = ctx.actor.userId
 
   if (ctx.actor.kind === "bot") {

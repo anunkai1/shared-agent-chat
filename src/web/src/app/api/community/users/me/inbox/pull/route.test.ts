@@ -252,8 +252,7 @@ describe("POST /api/community/users/me/inbox/pull — bot arm (folds inboxPull)"
       [{ id: "m_1" }],
       "bot_1",
       expect.any(Map),
-      // Present only when the page holds an author the bot may not obey.
-      undefined,
+      expect.objectContaining({ mayTask: expect.any(Function) }),
     )
   })
 

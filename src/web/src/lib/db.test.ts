@@ -86,6 +86,11 @@ describe("D1 session selection", () => {
     expect(d1.withSession).toHaveBeenCalledWith("first-unconstrained")
   })
 
+  it("supports an explicit primary session for bot policy reads", () => {
+    expect(getDb(d1, "first-primary")).toBeDefined()
+    expect(d1.withSession).toHaveBeenCalledWith("first-primary")
+  })
+
   it("starts authoritative reads and write-derived pre-reads on primary", () => {
     expect(getPrimaryDb(d1)).toBeDefined()
     expect(d1.withSession).toHaveBeenCalledWith("first-primary")

@@ -2,11 +2,9 @@
  * Who may cause a bot to run work.
  *
  * A chat message, a mention or channel membership is not permission to task
- * somebody else's agent. Every enforcement point calls this module so the rule
- * cannot drift between them:
- *
- *   - wake production (`buildUnreadWakeCommand`)
- *   - every bot-facing read (`toAgentMessages`: inbox, history, saved marks)
+ * somebody else's agent. This is the pure/time-injected rule for wake and
+ * content projections; taskAuthoritySql applies its owner/live-grant equivalent
+ * before attachment association and reconnect candidate selection.
  *
  * Two answers are possible today: the owner, always; and a named person holding
  * a live grant for that bot, optionally narrowed to one channel.

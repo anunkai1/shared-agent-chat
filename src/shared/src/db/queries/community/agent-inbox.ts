@@ -42,6 +42,7 @@ import { chunk, D1_MAX_IN_PARAMS, maxInParams } from "../_chunk";
 import { jsonTextSet } from "../_json-set";
 import { withD1Retry } from "../../resilience";
 import { hasDirectMentionSql, notificationEligibleSql } from "./notification-eligibility";
+import { taskAuthoritySql } from "./grant";
 
 type RawAgentMessage = {
   id: string;
@@ -256,15 +257,15 @@ export async function toAgentMessages(
   db: Database,
   rows: RawAgentMessage[],
   viewerId: string,
-  attachmentsByMessageId?: Map<string, AgentAttachmentRef[]>,
+  attachmentsByMessageId: Map<string, AgentAttachmentRef[]> | undefined,
   /**
-   * Bot-facing reads only. When supplied, a message the bot may not obey keeps
+   * Required for bot-facing reads. A message the bot may not obey keeps
    * its place in the conversation but loses every piece of actionable content:
    * text, attachments and reply quotes. Being able to see a room is not
    * authority to obey what was said in it, and a channel-scoped grant must not
    * leak into a channel it does not cover.
    */
-  authority?: { mayTask(authorId: string, channelId: string): boolean }
+  authority: { mayTask(authorId: string, channelId: string): boolean }
 ): Promise<Message[]> {
   if (rows.length === 0) return [];
 
@@ -294,7 +295,7 @@ export async function toAgentMessages(
     // Absent (not empty array) when a message has no attachments — smaller
     // wire payload; documented invariant in the plan.
     const atts = attachmentsByMessageId?.get(r.id);
-    const mayTask = !authority || authority.mayTask(r.authorId, r.channelId);
+    const mayTask = authority?.mayTask(r.authorId, r.channelId) === true;
     const content: MessageContent = { text: mayTask ? r.content : NO_TASK_AUTHORITY_TEXT };
     if (mayTask && atts && atts.length > 0) content.attachments = atts;
     const replyTo = r.replyToId ? replyByMessageId.get(r.replyToId) : undefined;
@@ -460,10 +461,11 @@ export async function toAgentMessage(
   db: Database,
   row: RawAgentMessage,
   viewerId: string,
-  attachments?: AgentAttachmentRef[]
+  attachments: AgentAttachmentRef[] | undefined,
+  authority: { mayTask(authorId: string, channelId: string): boolean }
 ): Promise<Message> {
   const map = attachments && attachments.length > 0 ? new Map([[row.id, attachments]]) : undefined;
-  const [msg] = await toAgentMessages(db, [row], viewerId, map);
+  const [msg] = await toAgentMessages(db, [row], viewerId, map, authority);
   return msg!;
 }
 
@@ -1001,13 +1003,19 @@ export async function getLatestUnreadMessageForAgent(
               id: communityMessage.id,
             },
           ),
+          taskAuthoritySql(
+            db,
+            botUserId,
+            db.select({ ownerUserId: user.ownerUserId }).from(user).where(eq(user.id, botUserId)),
+            new Date().toISOString()
+          ),
         )
       )
       .orderBy(desc(communityMessage.createdAt))
       .limit(1);
 
   const winners = (
-    await Promise.all(chunk(allowedChannelIds, AGENT_UNREAD_CHANNEL_CHUNK_SIZE).map(runChunk))
+    await Promise.all(chunk(allowedChannelIds, maxInParams(17)).map(runChunk))
   ).flat();
   if (winners.length === 0) return null;
   let best = winners[0]!;

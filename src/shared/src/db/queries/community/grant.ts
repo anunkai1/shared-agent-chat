@@ -1,16 +1,28 @@
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, exists, gt, isNull, or, sql, type SQLWrapper } from "drizzle-orm";
+import { communityMessage } from "../../community-schema";
 import { communityBotGrant } from "../../community-grant-schema";
 import { user } from "../../schema";
 import type { Database } from "../../index";
 import type { TaskGrant } from "../../../community/task-authority";
 
-/**
- * Grants are read on every wake decision and every bot-facing page, so the
- * predicates here are intentionally narrow: no joins, no formatting, one index
- * per access path.
- */
-
 const MAX_GRANT_MS = 24 * 60 * 60 * 1000;
+
+export function taskAuthoritySql(
+  db: Database,
+  botUserId: string,
+  ownerUserId: string | SQLWrapper,
+  nowIso: string
+) {
+  const liveGrant = db.select({ id: communityBotGrant.id }).from(communityBotGrant).where(and(
+    eq(communityBotGrant.botUserId, botUserId),
+    eq(communityBotGrant.grantedByUserId, ownerUserId),
+    eq(communityBotGrant.granteeUserId, communityMessage.authorId),
+    isNull(communityBotGrant.revokedAt),
+    gt(sql`julianday(${communityBotGrant.expiresAt})`, sql`julianday(${nowIso})`),
+    or(isNull(communityBotGrant.channelId), eq(communityBotGrant.channelId, communityMessage.channelId))
+  ));
+  return or(eq(communityMessage.authorId, ownerUserId), exists(liveGrant))!;
+}
 
 export type GrantRow = TaskGrant & {
   readonly id: string;

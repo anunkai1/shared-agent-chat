@@ -18,6 +18,7 @@ vi.mock("@alook/shared", () => ({
 }))
 
 import { withCommunityDaemonAuth } from "./community-daemon-auth"
+import { getDb } from "@/lib/db"
 
 const handler = vi.fn(async (_req: NextRequest, ctx: any) =>
   NextResponse.json({ ok: true, ctx })
@@ -68,6 +69,7 @@ describe("withCommunityDaemonAuth", () => {
     const res = await wrapped(req)
     expect(res.status).toBe(200)
     const body = (await res.json()) as { ctx: any }
+    expect(getDb).toHaveBeenCalledWith({}, "first-primary")
     expect(body.ctx).toMatchObject({
       userId: "u_1",
       machineId: "cm_1",
