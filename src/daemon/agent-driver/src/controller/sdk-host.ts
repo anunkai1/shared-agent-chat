@@ -61,8 +61,22 @@ export class SdkLane implements RuntimeLane {
     return this.send({ ...input, mode: "idle" });
   }
 
+  /**
+   * An in-process SDK lane has no vendor output that could prove it launched:
+   * `openLane()` already resolved, so the physical session exists and admitting
+   * a command is the handshake. Emitting it here — rather than waiting for the
+   * first vendor event — keeps a slow provider from looking like a failed
+   * launch; the daemon's stall watchdogs cover a slow turn.
+   */
+  private ensureInit(): void {
+    if (this.sentInit) return;
+    this.sentInit = true;
+    this.events.emit("runtime_event", { kind: "session_init", sessionId: this.sessionId });
+  }
+
   /** Delivers immediately; failures return through normalized events. */
   send(input: LaneSendInput): Promise<LaneAdmission> {
+    this.ensureInit();
     const receipt = input.terminalOwner ?? `${this.sessionId}:sdk:${++this.admissionSequence}`;
     void this.deliver(input.text, input.mode, receipt);
     return Promise.resolve({

@@ -48,7 +48,7 @@ describe("SdkLane.send", () => {
     session.on("runtime_event", (event) => received.push(event));
 
     await session.send({ text: "same", mode: "idle", terminalOwner: "pi:1" });
-    expect(received).toEqual([]);
+    expect(received).toEqual([{ kind: "session_init", sessionId: "s1" }]);
     pending[0]!.resolve();
     await pending[0]!.promise;
     await Promise.resolve();
@@ -238,5 +238,33 @@ describe("SdkLane.send", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("SdkLane handshake", () => {
+  it("reports session_init at admission, before the vendor produces any output", async () => {
+    let settlePrompt!: () => void;
+    const handle = fakeHandle(false);
+    handle.prompt.mockImplementation(() => new Promise<void>((resolve) => { settlePrompt = resolve; }));
+    const session = new SdkLane(handle, "s1");
+    const received: unknown[] = [];
+    session.on("runtime_event", (e) => received.push(e));
+
+    await session.start({ text: "slow model" });
+
+    expect(received).toEqual([{ kind: "session_init", sessionId: "s1" }]);
+    settlePrompt();
+  });
+
+  it("emits session_init once per lane even across several admissions", async () => {
+    const handle = fakeHandle(false);
+    const session = new SdkLane(handle, "s1");
+    const received: unknown[] = [];
+    session.on("runtime_event", (e) => received.push(e));
+
+    await session.start({ text: "one" });
+    await session.send({ text: "two", mode: "idle" });
+
+    expect(received.filter((e) => (e as { kind?: string }).kind === "session_init")).toHaveLength(1);
   });
 });
