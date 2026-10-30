@@ -107,6 +107,7 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
       page,
       botUserId,
       attachmentsByMessageId,
+      { taskAuthorityUserId: gate.bot.ownerUserId },
     ),
     { route: "community/users/me/inbox/pull:hydrate" },
   )

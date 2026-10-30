@@ -89,7 +89,9 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
       { channelId },
       readParams,
     )
-    const messages = await queries.communityAgentInbox.toAgentMessages(db, items, ctx.actor.userId)
+    const messages = await queries.communityAgentInbox.toAgentMessages(db, items, ctx.actor.userId, undefined, {
+      taskAuthorityUserId: ctx.actor.ownerUserId,
+    })
     return NextResponse.json({ items: messages, hasMore, ...(latestSeq !== undefined ? { latestSeq } : {}) })
   }
 

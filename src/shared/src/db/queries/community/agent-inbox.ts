@@ -31,6 +31,7 @@ import {
   type Seq,
   type ChannelRef,
 } from "../../../community-cli-contract";
+import { NO_TASK_AUTHORITY_TEXT } from "../../../community/task-authority";
 import { formatHandle } from "../../../lib/discriminator";
 import { listVisibleChannelIdsForUser } from "./channel";
 import { listDmChannelIdsForUser } from "./dm";
@@ -255,7 +256,14 @@ export async function toAgentMessages(
   db: Database,
   rows: RawAgentMessage[],
   viewerId: string,
-  attachmentsByMessageId?: Map<string, AgentAttachmentRef[]>
+  attachmentsByMessageId?: Map<string, AgentAttachmentRef[]>,
+  /**
+   * Bot-facing reads only. When supplied, a message from anyone other than
+   * `taskAuthorityUserId` keeps its place in the conversation but loses every
+   * piece of actionable content: text, attachments and reply quotes. Being able
+   * to see a room is not authority to obey what was said in it.
+   */
+  authority?: { taskAuthorityUserId: string | null }
 ): Promise<Message[]> {
   if (rows.length === 0) return [];
 
@@ -285,10 +293,11 @@ export async function toAgentMessages(
     // Absent (not empty array) when a message has no attachments — smaller
     // wire payload; documented invariant in the plan.
     const atts = attachmentsByMessageId?.get(r.id);
-    const content: MessageContent = { text: r.content };
-    if (atts && atts.length > 0) content.attachments = atts;
+    const mayTask = !authority || authority.taskAuthorityUserId === r.authorId;
+    const content: MessageContent = { text: mayTask ? r.content : NO_TASK_AUTHORITY_TEXT };
+    if (mayTask && atts && atts.length > 0) content.attachments = atts;
     const replyTo = r.replyToId ? replyByMessageId.get(r.replyToId) : undefined;
-    if (replyTo) content.replyTo = replyTo;
+    if (mayTask && replyTo) content.replyTo = replyTo;
     const forumReplyRef = scope.isForum ? `${channel}/${formatSeq(r.seq)}` : null;
     return {
       seq: formatSeq(r.seq),
