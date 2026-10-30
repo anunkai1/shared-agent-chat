@@ -27,33 +27,37 @@ This is an experimental fork of [Alook](https://github.com/alookai/alook), not a
 - [x] Feature branches and required pull requests; no force pushes/deleting main.
 - [x] Inherited Actions disabled pending review; no automatic deployment or package publication.
 - [x] Secret scanning/push protection and private vulnerability reporting enabled.
-- [ ] Complete validation and merge the bootstrap pull request.
+- [x] Complete validation and merge the bootstrap pull request (PR #1).
 
-### M1 — isolated proof of concept
+### M1 — isolated proof of concept — complete
 
-- [ ] Pin and record the exact revision and dependency/runtime versions used.
-- [ ] Run a disposable, restricted test environment with synthetic identities and sample files.
-- [ ] Test two human accounts: invitation, shared/private channels, DMs, threads, attachments and simultaneous sessions.
-- [ ] Test separately owner-bound runners: pairing, routing, disconnect/reconnect and duplicate delivery.
-- [ ] Test a clean Pi profile with representative non-secret tools/commands, subject to suitable narrowly scoped authentication.
-- [ ] Measure current ownership, notification, inbox and non-owner task behaviour using harmless actions.
-- [ ] Exercise desktop/mobile browser layouts; distinguish emulation from genuine device/OS testing.
-- [ ] Record private-control/shared-result options, runtime limitations and the changes needed for timed grants.
-- [ ] Produce an evidence-based go/no-go recommendation.
+- [x] Pin and record the exact revision and dependency/runtime versions used.
+- [x] Run a disposable, restricted test environment with synthetic identities and sample files.
+- [x] Test two human accounts: invitation, shared/private channels, DMs, threads, attachments and simultaneous sessions.
+- [x] Test separately owner-bound runners: pairing, routing and credential revocation. Reconnect and duplicate-delivery behaviour is covered by the project's own suites rather than by hand.
+- [x] Test a clean Pi profile: Pi 1.4.0 through the unmodified adapter, a sample-file tool action, a custom extension tool, and publication back through the credential proxy.
+- [x] Measure ownership, notification, inbox and non-owner task behaviour using harmless actions. A non-owner message woke and fed another owner's bot; muting was not authorisation.
+- [x] Exercise desktop and phone-sized browser layouts. Emulation, not physical devices.
+- [x] Record runtime limitations and the changes needed: the authority model, and a readiness signal for slow runtimes.
+- [x] Produce an evidence-based go/no-go recommendation: **go**, to build on it.
 
 M1 passes only when there is enough evidence to choose a foundation. It is not production readiness or a complete security assurance.
 
-### M2 — permission implementation, conditional on M1
+### M2 — permission implementation — server side complete
 
-- [ ] Design grants, authenticated identity, expiry/revocation and local runner enforcement.
-- [ ] Address permissive runtime launch defaults and local execution restrictions.
-- [ ] Add tests for cross-owner calls, forged/stale grants, expiry, revocation, queued/running work and active inbox access.
-- [ ] Test user-visible grant/revoke flows end to end before describing them as available.
+- [x] Design grants, authenticated identity, expiry/revocation and enforcement.
+- [x] Enforce on wake production and on every bot-facing read (inbox, channel history, saved marks), so membership is not authority.
+- [x] Grants to a named person, scoped to a bot and optionally a channel, with expiry and immediate revocation; owner authority is implicit and cannot expire.
+- [x] Tests for cross-owner calls, expiry, channel scoping, revocation, ownerless bots and active inbox access, plus 37 protocol checks against a running instance.
+- [ ] Grant/revoke user interface. The API is owner-only and complete; the web folder for it is not built.
+- [ ] Local runner-side enforcement. The runner still trusts the server's decision; closing this needs owner-signed grants.
+- [ ] Cancelling work already running when a grant is revoked. New and queued work stops today; running work does not.
+- [ ] Address permissive runtime launch defaults (Claude/Codex approval bypass) and local execution restrictions for runners.
 
 ### M3 — restricted pilot and deployment
 
 - [ ] Pilot with two separately owned, restricted runners.
-- [ ] Verify backup/restore and upgrades, including database migrations.
+- [x] Verify backup/restore and upgrades, including database migrations: a live snapshot restored twice into fresh instances with accounts, messages, grants and a consistent migration ledger intact.
 - [ ] Review production ingress, invitation policy and operational controls separately.
 - [ ] Deploy only a tested revision; do not automatically follow upstream or unreviewed pull requests.
 
