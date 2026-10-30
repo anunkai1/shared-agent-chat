@@ -25,6 +25,8 @@ The inherited Claude and Codex adapters request permissive execution/approval mo
 
 The Pi SDK adapter exists. Compatibility with a particular extension set and authentication arrangement remains untested. Gemini CLI compatibility is unverified.
 
+GitHub reported 84 inherited dependency alerts at the first bootstrap push, including two critical runtime-scoped alerts in `pnpm-lock.yaml`: DOMPurify (`GHSA-cg2g-xh64-v4q7`, patched in 3.4.17) and proxy-addr (`GHSA-jqcg-44mw-7w3h`, patched in 2.0.8). Alert counts are a snapshot, not a completed reachability/exploitability assessment. Assess the actual dependency paths and applicable fixes before any pilot or production exposure; do not blindly mass-upgrade the lockfile.
+
 ## Evidence still required
 
 All M1 checklist items in [PLAN.md](PLAN.md): runtime startup, two-user flows, separate runner routing, permission baseline, Pi functionality, reconnect behaviour and browser usability. No source-inspection finding should be reported as a successful end-to-end test.
