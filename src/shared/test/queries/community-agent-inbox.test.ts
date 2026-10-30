@@ -3,6 +3,7 @@ import { createDb } from "../../src/db";
 import * as agentInbox from "../../src/db/queries/community/agent-inbox";
 import * as marks from "../../src/db/queries/community/mark";
 import { formatRef, formatSeq, DM_SERVER } from "../../src/community-cli-contract";
+import { NO_TASK_AUTHORITY_TEXT } from "../../src/community/task-authority";
 
 /**
  * Generic chainable + thenable mock. Every builder method (`select`, `from`,
@@ -1013,5 +1014,54 @@ describe("hasDeliverableUnreadForAgentScope", () => {
     const result = await agentInbox.hasDeliverableUnreadForAgentScope(db, "bot_1", "thread_x", 0);
     expect(result).toBe(true);
     expect(db.select).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("toAgentMessages — task authority", () => {
+  const seed = () => createSequentialDb([
+    [{ id: "ch_1", name: "general", serverId: "srv_1", parentChannelId: null, parentMessageId: null }],
+    [{ id: "u_1", name: "Alice", discriminator: "1234" }],
+    [{ id: "srv_1", name: "studio", discriminator: "0042" }],
+  ]);
+
+  it("withholds the text of a message its reader may not obey", async () => {
+    const [msg] = await agentInbox.toAgentMessages(
+      seed(),
+      [rawMsg()],
+      "viewer_1",
+      undefined,
+      { taskAuthorityUserId: "owner_elsewhere" },
+    );
+    expect(msg!.content.text).toBe(NO_TASK_AUTHORITY_TEXT);
+    expect(msg!.content.text).not.toContain("hello");
+  });
+
+  it("keeps the place in the conversation so the reader still sees who spoke", async () => {
+    const [msg] = await agentInbox.toAgentMessages(
+      seed(),
+      [rawMsg()],
+      "viewer_1",
+      undefined,
+      { taskAuthorityUserId: "owner_elsewhere" },
+    );
+    expect(msg!.seq).toBe(formatSeq(1));
+    expect(msg!.sender).toBe("@Alice#1234");
+    expect(msg!.channel).toBe(formatRef({ server: "studio#0042", channel: "general" }));
+  });
+
+  it("shows the text when the author does hold authority", async () => {
+    const [msg] = await agentInbox.toAgentMessages(
+      seed(),
+      [rawMsg()],
+      "viewer_1",
+      undefined,
+      { taskAuthorityUserId: "u_1" },
+    );
+    expect(msg!.content.text).toBe("hello");
+  });
+
+  it("is unchanged for callers that pass no authority at all (human-facing reads)", async () => {
+    const [msg] = await agentInbox.toAgentMessages(seed(), [rawMsg()], "viewer_1");
+    expect(msg!.content.text).toBe("hello");
   });
 });

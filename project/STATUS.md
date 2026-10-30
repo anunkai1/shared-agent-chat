@@ -4,9 +4,9 @@ Status date: 30/10/2026. Evaluation revision: `09947e71fa78a67ffc5fa9e6319653aef
 
 ## Current phase
 
-M1 (isolated proof of concept) is **partly complete**. The permission model that motivates this
-fork is **not implemented**, and the evaluation found that the unmodified product cannot enforce it
-without the M2 work described in [PLAN.md](PLAN.md).
+M1 (isolated proof of concept) is **partly complete**, and M2 has started: **owner-only task authority
+is now implemented on the server** (see below). Delegated, expiring grants — the rest of M2 — are still
+planned, not implemented.
 
 Labels used below: **API** — real HTTP with synthetic authenticated accounts; **WS** — real
 WebSocket control plane; **fixture** — a protocol-level machine client that speaks the real
@@ -46,19 +46,32 @@ Pi SDK 1.4.0, a real model and real tool calls. Only the last row is end-to-end 
 | A second chat message in the same session is handled without a respawn, and the agent remembers earlier context. | real runner |
 | Stopping the daemon waits for the session to close, and revoking the machine removes its bot and refuses the credential. | real runner |
 
-### What does not
+### Owner authority — implemented, unit-verified
+
+One predicate decides who may cause a bot to run work: `hasTaskAuthority` in
+`src/shared/src/community/task-authority.ts`. Three gates call it, so the rule cannot drift between
+them:
+
+| Gate | Behaviour |
+|---|---|
+| Wake production | an unread from a non-owner never produces an `agent:wake` (`no_task_authority`) |
+| Inbox pull | the message and sender stay visible; text, attachments and reply quotes are withheld |
+| Channel history (bot reads) | same withholding, so re-reading a room is not a way around the inbox |
+
+An ownerless bot wakes for nobody. Covered by unit tests — `hasTaskAuthority` itself, the wake gate,
+and `toAgentMessages` withholding — and the shared suite is 2,482 tests green with `tsc` clean.
+**Not yet re-verified end-to-end** against a running instance; that is the next check.
+
+### What does not work yet
 
 | Result | Method |
 |---|---|
-| **A message from another member wakes someone else's bot.** No grant exists; channel visibility is treated as sufficient. | WS, fixture |
-| **The bot's active inbox returns that other member's text**, so a runner can act on an instruction its owner never authorised. | API, fixture |
-| Setting a bot's channel notifications to "nothing" does not stop it reading that channel's messages. Muting is not authorisation. | API, fixture |
-| A slow model's first turn is aborted unless the daemon's fixed 60-second startup watchdog is raised: a multi-minute local prefill produces no output in time and the session is torn down. A slow-runtime path must not be told "it works" without that qualification. | real runner |
+| There is no delegated access: a second person cannot be granted authority even temporarily, and there is nothing to expire or revoke. | by construction |
+| The runner trusts the server's decision. A compromised or malicious server could still deliver text the runner would act on. | source inspection |
+| A slow model's first turn is aborted unless the daemon's startup watchdog is raised — **fixed** in `94d9100`, where the SDK lane now reports readiness when it opens rather than when the model first speaks. | real runner |
 | The local development stack returns intermittent HTTP 500/503 from SQLite contention, so some test steps need retries. | API |
 
-The first three rows confirm what source review predicted: notification eligibility and channel
-membership are not task authorisation. This is a missing product concept, not a single defect, and
-a prompt or UI warning cannot supply it.
+The first row is the remaining product gap. Rows two and four are honest limits, not defects.
 
 ## Known risks carried into any decision
 

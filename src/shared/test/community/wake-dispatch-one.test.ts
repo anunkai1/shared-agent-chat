@@ -49,7 +49,7 @@ const fakeDb = {} as Database;
 const MESSAGE_CHANNEL = {
   id: "msg_1",
   seq: 7,
-  authorId: "u_human",
+  authorId: "owner_1",
   channelId: "ch_1",
   dmConversationId: null,
 };

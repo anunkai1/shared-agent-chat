@@ -51,7 +51,7 @@ const fakeDb = {} as Database;
 const MESSAGE_CHANNEL = {
   id: "msg_1",
   seq: 7,
-  authorId: "u_human",
+  authorId: "owner_1",
   channelId: "ch_1",
 };
 
@@ -95,7 +95,7 @@ function seedHappyPath(overrides?: {
     isReadable: true,
   }]]));
   // Audit path best-effort defaults — happy replies so the wake still fires.
-  mockGetUsersByIds.mockResolvedValue([{ id: "u_human", name: "gustavo", discriminator: "0042" }]);
+  mockGetUsersByIds.mockResolvedValue([{ id: "owner_1", name: "gustavo", discriminator: "0042" }]);
   mockHasMentionForMessage.mockResolvedValue(false);
   mockInsertBotAuditWakeTrigger.mockResolvedValue({ id: "evt_1", createdAt: "2026-07-23T00:00:00.000Z" });
 }
@@ -382,7 +382,7 @@ describe("buildUnreadWakeCommand", () => {
         messageId: "msg_1",
         channel: "/srv_1/general",
         seq: 7,
-        senderId: "u_human",
+        senderId: "owner_1",
         senderHandle: "@gustavo#0042",
         reason: "unread",
       },
@@ -438,11 +438,11 @@ describe("buildUnreadWakeCommand", () => {
     expect(mockInsertBotAuditWakeTrigger).not.toHaveBeenCalled();
   });
 
-  it("audit is skipped silently when the bot has no owner (unbound owner column)", async () => {
+  it("an ownerless bot wakes for nobody — no owner means no authority holder", async () => {
     seedHappyPath({ bot: { ownerUserId: null } });
 
     const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
-    expect(result.state).toBe("ready");
+    expect(result).toEqual({ state: "skip", reason: "no_task_authority" });
     expect(mockInsertBotAuditWakeTrigger).not.toHaveBeenCalled();
     expect(mockGetUsersByIds).not.toHaveBeenCalled();
   });
@@ -479,6 +479,28 @@ describe("buildUnreadWakeCommand", () => {
     const env = { WS_DO_WORKER: { fetch: fetchMock } };
 
     const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" }, env);
+    expect(result.state).toBe("ready");
+  });
+});
+
+describe("buildUnreadWakeCommand — author authority", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("skips when the newest unread was written by someone other than the bot's owner", async () => {
+    seedHappyPath({ message: { authorId: "u_stranger" } });
+    await expect(
+      buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" }),
+    ).resolves.toEqual({ state: "skip", reason: "no_task_authority" });
+    expect(mockResolveNotificationEligibilityForUsers).not.toHaveBeenCalled();
+    expect(mockInsertBotAuditWakeTrigger).not.toHaveBeenCalled();
+  });
+
+
+  it("wakes for the owner even when notifications are otherwise unrestricted", async () => {
+    seedHappyPath();
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
     expect(result.state).toBe("ready");
   });
 });

@@ -1,6 +1,7 @@
 import type { HostCommand, UnreadNotice } from "../community-cli-contract";
 import { makeRuntimeConfig } from "../runtime-config";
 import { resolveModelConfig } from "./bot-model";
+import { hasTaskAuthority } from "./task-authority";
 import { formatHandle } from "../lib/discriminator";
 import { utcDayKey } from "../utils/day-key";
 import * as message from "../db/queries/community/message";
@@ -132,7 +133,8 @@ export type SkipReason =
   | "notice_channel_unresolvable"
   | "already_read"
   | "muted"
-  | "mention_only";
+  | "mention_only"
+  | "no_task_authority";
 
 export type BuildUnreadWakeResult =
   | {
@@ -184,6 +186,13 @@ export async function buildUnreadWakeCommand(
   // Queue items are hints, not authority. Re-check current policy, persisted
   // attention, and the read cursor in one snapshot so a concurrent setting
   // mutation cannot clear this message between separate gates.
+  //
+  // Author authority comes first: a channel can be read without granting the
+  // right to cause work, so membership, notification level and unread state are
+  // all downstream of this and cannot substitute for it.
+  if (!hasTaskAuthority({ botOwnerUserId: botCtx.ownerUserId, authorId: msg.authorId })) {
+    return { state: "skip", reason: "no_task_authority" };
+  }
   const policyByUser = await notificationEligibility.resolveNotificationEligibilityForUsers(
     db,
     [input.botUserId],
