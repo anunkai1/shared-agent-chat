@@ -20,7 +20,13 @@ export const GET = withAuth(async (_req, ctx) => {
   if (!bot) return writeError("bot not found", 404)
 
   const grants = await queries.communityGrant.listGrantsForBot(db, id)
-  const authority = await loadTaskAuthority(db, { botUserId: id, botOwnerUserId: ctx.userId })
+  // The owner view must answer for every row, so ask for all authors at once
+  // rather than letting the owner-only fast path return no check.
+  const authority = await loadTaskAuthority(db, {
+    botUserId: id,
+    botOwnerUserId: ctx.userId,
+    authorIds: grants.map((grant) => grant.granteeUserId),
+  })
   const nowMs = Date.now()
 
   return writeJSON({
@@ -41,7 +47,9 @@ export const GET = withAuth(async (_req, ctx) => {
         live,
         // The enforcement answer for the exact channel this grant covers, so a
         // channel-scoped grant cannot be displayed as broader than it is.
-        effective: authority.mayTask(grant.granteeUserId, grant.channelId),
+        effective: authority
+          ? authority.mayTask(grant.granteeUserId, grant.channelId)
+          : grant.granteeUserId === ctx.userId,
       }
     }),
   })

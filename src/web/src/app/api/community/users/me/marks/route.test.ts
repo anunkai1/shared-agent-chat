@@ -21,6 +21,9 @@ vi.mock("@alook/shared", async () => {
   const actual = await vi.importActual<typeof import("@alook/shared")>("@alook/shared")
   return {
     ...actual,
+    // The route resolves task authority before hydration; this suite covers the
+    // marks projection, and the authority rule has its own tests.
+    loadTaskAuthority: async () => undefined,
     queries: {
       communityMessageMark: {
         listMarksForUser: (...args: unknown[]) => mockListMarksForUser(...args),
@@ -209,6 +212,8 @@ describe("GET /api/community/users/me/marks", () => {
       [message],
       "bot_1",
       expect.any(Map),
+      // Present only when a marked message's author is not the owner.
+      undefined,
     )
   })
 
