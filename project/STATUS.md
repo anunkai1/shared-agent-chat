@@ -57,10 +57,16 @@ them:
 | Wake production | an unread from a non-owner never produces an `agent:wake` (`no_task_authority`) |
 | Inbox pull | the message and sender stay visible; text, attachments and reply quotes are withheld |
 | Channel history (bot reads) | same withholding, so re-reading a room is not a way around the inbox |
+| Saved marks (bot reads) | same withholding |
 
-An ownerless bot wakes for nobody. Covered by unit tests — `hasTaskAuthority` itself, the wake gate,
-and `toAgentMessages` withholding — and the shared suite is 2,482 tests green with `tsc` clean.
-**Not yet re-verified end-to-end** against a running instance; that is the next check.
+An ownerless bot wakes for nobody. The enriched message projection is also redacted for bot callers:
+it is chosen by contract header rather than by credential, so without that a bot could have requested the
+richer shape and received unredacted bodies.
+
+Verified two ways: unit tests for `hasTaskAuthority`, the wake gate and the withholding — shared suite
+2,482 tests green, `tsc` clean for shared and web — and **end to end against a running instance**, where
+26/26 protocol checks pass, including "a non-owner message does not wake the owner's bot" and "the owner's
+bot cannot obtain a non-owner's text through its inbox, its history or by asking for the richer shape".
 
 ### What does not work yet
 

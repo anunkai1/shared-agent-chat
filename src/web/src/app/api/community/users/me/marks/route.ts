@@ -61,6 +61,7 @@ export const GET = withCommunityActor(async (req, ctx) => {
         rows.map((row) => row.message),
         userId,
         attachmentsByMessageId,
+        ctx.actor.kind === "bot" ? { taskAuthorityUserId: ctx.actor.ownerUserId } : undefined,
       ),
       { route: "community/users/me/marks:hydrate" },
     )
