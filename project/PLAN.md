@@ -6,7 +6,7 @@ A self-hosted conversation space for multiple people and their independently own
 
 This is an experimental fork of [Alook](https://github.com/alookai/alook), not an original implementation or an official Alook service. The main code remains Apache-2.0; retain applicable third-party notices.
 
-## Intended permissions — not implemented yet
+## Intended permissions — partially implemented
 
 - Owner-only agent instructions by default.
 - An owner can grant a specific authenticated person access to a specific agent, optionally scoped to a channel and capability set.
@@ -43,21 +43,24 @@ This is an experimental fork of [Alook](https://github.com/alookai/alook), not a
 
 M1 passes only when there is enough evidence to choose a foundation. It is not production readiness or a complete security assurance.
 
-### M2 — permission implementation — server side complete
+### M2 — permission implementation — incomplete
 
-- [x] Design grants, authenticated identity, expiry/revocation and enforcement.
-- [x] Enforce on wake production and on every bot-facing read (inbox, channel history, saved marks), so membership is not authority.
-- [x] Grants to a named person, scoped to a bot and optionally a channel, with expiry and immediate revocation; owner authority is implicit and cannot expire.
-- [x] Tests for cross-owner calls, expiry, channel scoping, revocation, ownerless bots and active inbox access, plus 37 protocol checks against a running instance.
-- [ ] Grant/revoke user interface. The API is owner-only and complete; the web folder for it is not built.
-- [ ] Local runner-side enforcement. The runner still trusts the server's decision; closing this needs owner-signed grants.
-- [ ] Cancelling work already running when a grant is revoked. New and queued work stops today; running work does not.
+- [x] Implement owner/live-grant predicates, schema and owner-only grant APIs.
+- [x] Add mandatory policies to covered bot projections, independently filter enriched quotes, and check bot attachment reads/reuse against authorised message associations.
+- [x] Strict grant scope/duration validation, explicit grant liveness and primary-consistent covered identity/policy reads.
+- [x] Add regression tests for missing/ownerless policies, single-message reads, quotes, attachment revoke/expiry, malformed grants and authorised reconnect selection.
+- [ ] Verify the changed revision through a fresh-image live protocol run. Historical 37/37 fixtures did not cover all bypasses or runner cancellation and used a source overlay on an older image.
+- [ ] Grant/revoke user interface. The owner-only API exists; the interface is not built.
+- [ ] Independent runner admission and queued-work revalidation, preserving author/grant/expiry provenance. Honest-server enforcement does not itself require signatures; malicious-server resistance is a separate design.
+- [ ] Selective queued/running delegated-work cancellation on revoke/expiry, preserving owner work. Existing server filtering does not implement this.
 - [ ] Address permissive runtime launch defaults (Claude/Codex approval bypass) and local execution restrictions for runners.
 
 ### M3 — restricted pilot and deployment
 
 - [ ] Pilot with two separately owned, restricted runners.
-- [x] Verify backup/restore and upgrades, including database migrations: a live snapshot restored twice into fresh instances with accounts, messages, grants and a consistent migration ledger intact.
+- [ ] Full recovery: database, uploaded objects, key versions and attachment-byte canaries. Earlier checks restored only D1; strengthened selected-table fingerprint helpers still need a full live restore run.
+- [ ] Upgrade to a newer pinned build with migration/content checks on restored state.
+- [ ] Separate rollback verification; restoring the same old image twice is not an upgrade/rollback test.
 - [ ] Review production ingress, invitation policy and operational controls separately.
 - [ ] Deploy only a tested revision; do not automatically follow upstream or unreviewed pull requests.
 

@@ -2,7 +2,7 @@
 
 An independently maintained, Apache-2.0 fork of [Alook](https://github.com/alookai/alook), evaluating self-hosted chat for people and their separately owned agents.
 
-**Status:** project setup and isolated evaluation. Owner-only task permissions, temporary per-user access grants and additional execution safeguards are planned, **not implemented**. Do not connect unrestricted personal agents or treat this as production-ready.
+**Status:** isolated evaluation and permission hardening. Owner-only server rules and temporary named-person grants exist, but runner-side admission, selective revocation/cancellation and full recovery verification remain incomplete. **Not ready for a real-agent pilot.** Do not connect unrestricted personal agents or treat this as production-ready.
 
 - [Project plan](project/PLAN.md) · [Verified status](project/STATUS.md) · [Upstream/update workflow](project/UPSTREAM.md) · [Security](SECURITY.md) · [Operating notes](project/OPERATIONS.md)
 - Public source does not make hosted conversations or runtime credentials public. Keep private deployment state outside Git.

@@ -1,123 +1,92 @@
 # Project status
 
-Status date: 30/10/2026. Evaluation revision: `09947e71fa78a67ffc5fa9e6319653aef33d1564`.
+Status date: 31/10/2026. **Useful foundation; not ready for a real-agent pilot.**
 
 ## Current phase
 
-M1 (isolated proof of concept) is **complete**, and M2 is **implemented server-side**: owner-only task
-authority *and* delegated, expiring, revocable grants. What remains of M2 is a user interface for
-granting, runner-side independent enforcement, and cancellation of work already running when a grant is
-revoked. M3 (pilot and deployment) has not started.
+The isolated evaluation supports continuing with Alook. M2 permissions are **incomplete**, not
+“server side complete”. A scoped review found bypasses in single-message reads, attachments and quoted
+content, plus grant/reconnect defects and missing runner revocation controls. Server hardening is now
+covered by targeted regressions, but a fresh-image live verification of these changes remains outstanding.
+M3 pilot/deployment has not started.
 
-Labels used below: **API** — real HTTP with synthetic authenticated accounts; **WS** — real
-WebSocket control plane; **fixture** — a protocol-level machine client that speaks the real
-protocol but runs no model or tools; **real runner** — the actual daemon, the unmodified Pi adapter,
-Pi SDK 1.4.0, a real model and real tool calls. Only the last row is end-to-end runtime evidence.
+The review covered fork changes and relevant callers, not all inherited code, host security, every
+adapter or dependency exploitability. It was not an independent second-person review or penetration test.
 
-## Verified setup
+## Source and project controls
 
-- Public repository: https://github.com/anunkai1/shared-agent-chat (fork of `alookai/alook`).
-- Upstream baseline: `4a324e5796bf33ef4822e4053bd222735580aefa`; Apache-2.0 licence and history retained.
-- `main` requires pull requests including for administrators; force pushes and deletion are disabled.
-  There is no second-reviewer requirement for this single-maintainer project.
-- GitHub Actions remain disabled pending review of inherited workflows; there is no automatic
-  deployment or package publication.
-- Secret scanning, push protection and private vulnerability reporting are enabled. These are
-  safeguards, not proof that all sensitive material is detected.
+- Fork: https://github.com/anunkai1/shared-agent-chat; upstream `alookai/alook`.
+- Baseline: `4a324e5796bf33ef4822e4053bd222735580aefa`; Apache-2.0 history/licence retained.
+- Main requires PRs, including administrators; force-push/deletion disabled. There is no required
+  second reviewer. Historical self-merges are not independent approval.
+- Inherited Actions remain disabled; no automatic publication or deployment.
+- Secret scanning/push protection/private vulnerability reporting are enabled, not proof of safety.
+- Privileged personal agent environments remain separate from evaluation runners.
 
-## Evaluation results
+## Historical evaluation — do not extrapolate to the current build
 
-### What works
+Initial image/source baseline: `09947e71fa78a67ffc5fa9e6319653aef33d1564`. Later protocol runs used
+modified-source overlays in that older image. Their stored source label was not an exact identity of
+the overlaid code; they are not fresh-image verification of the final merged changes.
 
-| Result | Method |
+| Evidence | Method and limit |
 |---|---|
-| Self-hosted instance starts from a source-pinned build in a restricted container, with no host ports published. | runtime |
-| Two synthetic users exchange messages in a shared channel and a thread; authors are recorded correctly; a retry with the same nonce does not duplicate a message. | API, browser |
-| A client-supplied `authorId` cannot impersonate another user. | API |
-| Private-channel messages, posting and member listing are denied to a non-member, the channel is absent from their directory, and its content never reaches their WebSocket. | API, WS |
-| A bot without private-channel membership cannot read that channel. | fixture |
-| Cross-owner isolation of machines and bots holds: another user cannot create a bot on someone's machine, reconfigure it, reset its session or delete the machine; a machine credential cannot enrol another owner's bot; a reset reaches only the intended machine. | API, WS, fixture |
-| Pairing tokens are single-use, and a revoked machine credential is refused afterwards. | API, fixture |
-| Chat sessions and message history survive a restart of the instance. | runtime |
-| Desktop and phone-sized layouts are usable; this was browser emulation, not physical-device testing. | browser |
-| A real runner detects the installed Pi 1.4.0, reports it healthy, connects, pairs a machine, enrols a bot and joins a room using a clean profile with no personal credentials. | real runner |
-| A real model, driven by the real chat message, reads a sample file with Pi's tool suite and runs a harmless command in a disposable workspace. | real runner |
-| A user-installed extension loads, and its custom tool is called by the model. | real runner |
-| The agent publishes its result back to the channel itself, through the daemon's real credential proxy — it holds a per-launch voucher, not the machine key. | real runner |
-| A second chat message in the same session is handled without a respawn, and the agent remembers earlier context. | real runner |
-| Stopping the daemon waits for the session to close, and revoking the machine removes its bot and refuses the credential. | real runner |
+| Restricted self-hosted instance; synthetic users exchange channel/thread messages; author spoof rejected; nonce retries deduplicate. | Real HTTP, 28 initial human checks; selected browser flows. |
+| Private membership/read/post/upload boundaries; cross-owner machine/bot create/config/reset/delete boundaries; single-use pairing and credential revocation. | Real HTTP/WS protocol fixtures, including 23 initial runner checks. No model/tools in fixtures. |
+| Sessions/history survive same-container restart; selected desktop/phone-size flows work. | Browser emulation, not physical devices; not all navigation attempts passed. A dedicated private-content WS exclusion run was not demonstrated. |
+| One actual Pi 1.4.0 daemon/adapter run used a clean profile, read a sample file, ran bash, loaded a custom extension tool, published a result through the credential proxy and retained context on a follow-up. | Real model/tool execution, 11 checks, **with the harness handshake timeout raised to 600 seconds**. It preceded the readiness fix. Slash-command and other real adapters were not tested. |
+| SDK readiness fix `94d9100`: initialise at SDK send admission rather than first model output. | Focused host/logical-session tests, 154 passing. No genuine post-fix/default-timeout model rerun was demonstrated. |
+| Grants allow a named person, optional channel, expiry and early revoke; selected wake/inbox/history/marks paths were checked. | 37 live protocol fixture checks. Did **not** establish expired-grant read withholding, single resolve, attachment revoke, nested quote filtering or runner cancellation. |
+| A D1 snapshot was restored twice using the same old image. | First compared counts/ledger; second checked users only. No uploaded-object/key recovery, newer-build migration upgrade or rollback proof. |
 
-### Owner authority and delegated grants — implemented and verified
+## Server hardening in this change
 
-One predicate decides who may cause a bot to run work: `hasTaskAuthority` in
-`src/shared/src/community/task-authority.ts`. Three gates call it, so the rule cannot drift between
-them:
+- Bot message projection requires an explicit policy; missing/unowned policies fail closed without
+  removing the owner-only-page optimisation that avoids unnecessary grant queries.
+- Single-message resolve applies the same policy as inbox/history/marks.
+- Enriched history checks quoted authors independently, including targets outside the current page;
+  unprovenanced embeds/thread previews are omitted.
+- Shared attachment SQL checks bot authority for associated messages as well as membership, covering
+  downloads, thumbnails and file reuse in outgoing messages. Active uploaders retain their own uploads.
+- Covered bot identity/policy reads use primary-consistent D1 sessions. No remote replica-lag experiment
+  has been run; session selection has regression coverage.
+- Strict request schemas reject malformed scopes/bodies/durations instead of broadening access.
+  Grant listing reports `live`; the misleading scope-independent `effective` flag was removed.
+- Reconnect filters authorised candidates **before** selecting the newest unread, so a newer stranger
+  or expired grantee does not hide older owner work.
 
-| Gate | Behaviour |
-|---|---|
-| Wake production | an unread from a non-owner never produces an `agent:wake` (`no_task_authority`) |
-| Inbox pull | the message and sender stay visible; text, attachments and reply quotes are withheld |
-| Channel history (bot reads) | same withholding, so re-reading a room is not a way around the inbox |
-| Saved marks (bot reads) | same withholding |
-| Grants | the owner may grant **one named person** authority to task **one bot** until a stated time, optionally in one channel; revoke takes effect on the next wake and the next read |
+New tests include real SQLite queries, real route/projector combinations with synthetic identity/DB
+fixtures, pure-policy tests and request/handler tests. None is a live deployment or real-model rerun.
+See the change's verification record for exact revision/tree/lockfile identity, commands and outcomes.
 
-An ownerless bot wakes for nobody. The enriched message projection is also redacted for bot callers:
-it is chosen by contract header rather than by credential, so without that a bot could have requested the
-richer shape and received unredacted bodies.
+## Verification limits
 
-Verified two ways: unit tests for the rule, the wake gate, the withholding and grant expiry — and
-**end to end against a running instance**, where **37/37** protocol checks pass. Those include: a
-non-owner message does not wake the owner's bot; its text is withheld from the inbox, from a history
-re-read and from the richer response shape; a non-owner cannot grant; a live grant wakes the bot and
-makes that person's text readable; a channel-scoped grant does not authorise another channel; revoke
-stops both wake and read immediately; expiry does the same; and the owner view reports `live` and
-`effective` from the same predicate the enforcement points use.
+The earlier package run covered shared, web-node, agent-driver and daemon **unit** tests; daemon packed
+version/bundle/self-update tests were excluded. It was not a complete root-suite pass. The old dependency
+count and test counts are historical snapshots, not current security/build status.
 
-### What does not work yet
+Current checks and their failures are recorded in [VERIFICATION.md](VERIFICATION.md). A passing focused
+suite does not erase a root-suite failure. An environment repair or isolated retry must be labelled as
+such, not silently substituted for the failed run.
 
-| Result | Method |
-|---|---|
-| There is no grant management interface: grants exist as an API (`POST`/`GET`/`DELETE` on a bot's `grants`), usable by the owner only, but not yet surfaced in the web UI. | by construction |
-| The runner trusts the server's decision. A compromised or malicious server could still deliver text the runner would act on. | source inspection |
-| A slow model's first turn is aborted unless the daemon's startup watchdog is raised — **fixed** in `94d9100`, where the SDK lane now reports readiness when it opens rather than when the model first speaks. | real runner |
-| The local development stack returns intermittent HTTP 500/503 from SQLite contention, so some test steps need retries. | API |
+## Remaining gates
 
-The first row is the remaining product gap. Rows two and four are honest limits, not defects.
+1. **Runner authority and revocation:** preserve author/grant/expiry provenance through admission;
+   revalidate queued delegated work; selectively remove it and attempt running interruption on revoke
+   or expiry, preserving owner work. The current server row update does none of this. Already delivered
+   bytes and completed side effects cannot be recalled.
+2. Honest-server runner enforcement is separate from malicious-server resistance. Signatures are not
+   inherently necessary for the former; no independent trust-root guarantee exists for the latter.
+3. Grant-management UI, safer runtime launch defaults and independently restricted runners. Claude/Codex
+   still request approval-bypass/full-access modes; prompts encourage unsolicited continuation.
+4. Exact-revision fresh-image HTTP/WS checks, including revoked/expired reads, known attachment IDs,
+   nested quotes and reconnect; then end-to-end runner cancellation evidence.
+5. Complete root/packed/runtime gates, remaining dependency advisories and local SQLite contention.
+   DOM tests need test-mode React, and process tests need reliable child reaping. Neither is permission
+   to suppress failing tests.
+6. Full object/key/database recovery, attachment-byte canaries, a real newer-build upgrade and a
+   separate rollback test. Stronger fingerprint helpers alone do not establish these journeys.
+7. Independent review, two actual people, separately owned restricted runners, Windows and physical-device
+   coverage; separately approved ingress/TLS/auth/invitation/rate-limit policy before deployment.
 
-## Known risks carried into any decision
-
-- The Claude and Codex adapters request approval-bypass and full-access execution modes. Open source
-  is not a safe default configuration; runner containment must be independent.
-- The system prompt encourages an agent to continue work without an explicit request, which is the
-  opposite of the intended default.
-- Production dependency audit reports 1 critical, 15 high, 25 moderate and 8 low findings. One
-  critical advisory is confirmed on an installed path (`@streamdown/mermaid` → `mermaid` →
-  `dompurify@3.4.16`, patched in 3.4.17). Applicability depends on specific features; exploitability
-  in this application has **not** been demonstrated. `proxy-addr` is 2.0.8 on the traced production
-  path.
-- An earlier version of this file described `proxy-addr` as a runtime-critical alert. That claim was
-  too strong for the traced path and has been corrected.
-
-## Test gates
-
-- `pnpm typecheck`: **passes**.
-- Shared-package tests: **pass** (2,472).
-- Root `pnpm test`: **fails** (exit 1). WebSocket and shared suites pass; daemon lifecycle/update,
-  repository invocation-contract, daemon creation and PII tests fail. Some PII failures pass in
-  isolation, so at least part is suite ordering rather than a proven upstream defect.
-- Lint: **not run**.
-- A failing suite is recorded as a failing gate, not a passing one.
-
-## Not established
-
-- No full security audit, no independent review, no penetration test.
-- No physical phone, tablet or Windows-device testing; no genuine second-person onboarding.
-- No test of resistance to a malicious hosting operator.
-- Nothing here shows that a model would refuse an instruction it is technically able to receive.
-
-## Next action
-
-Decide whether to fund M2 — server-side grants plus runner-side enforcement, revocation that also
-covers queued and running delegated work, and a readiness signal that works for slow runtimes — or
-to compare an alternative foundation first. No production route, no real agents and no personal
-credentials will be attached before that decision.
+No production route or real-agent pilot is authorised by these implementation results.
