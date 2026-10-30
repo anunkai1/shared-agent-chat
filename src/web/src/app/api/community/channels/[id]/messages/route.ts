@@ -9,6 +9,8 @@ import { readCommunityConversationEntry } from "@/lib/community/conversation-ent
 import { writeCommunityMessagesRead, writeCommunityConversationEntryRead } from "@/lib/community/read-contract"
 import { resolveMessageTarget } from "@/lib/community/message-door"
 import { handleHumanSend, handleBotSend } from "@/lib/community/message-send.server"
+import { NO_TASK_AUTHORITY_TEXT } from "@alook/shared"
+import type { MessagePage } from "@/lib/community/read-contract"
 
 // A bot addresses by ref-in-body; the path `[id]` is then a placeholder
 // (`channels/resolve/messages`) since a ref carries `/` and can't sit in a path
@@ -41,6 +43,32 @@ function parseIntParam(raw: string | null): number | undefined {
  * create-if-missing (structurally, not just create=false — Aigneis #246 ⑤); a
  * ref to a nonexistent target is a 404, not a read-then-create.
  */
+type BotReadableMessage = {
+  authorId?: string
+  content?: string
+  attachments?: unknown[]
+  replyToId?: string | null
+  replyTo?: unknown
+}
+
+/**
+ * The enriched projection is selected by CONTRACT HEADER, not by credential, so a
+ * bot that sends the header lands on it with unredacted bodies. Authority is a
+ * property of the caller, not of the response shape, so withhold here exactly what
+ * the agent arm withholds — otherwise a header would be a way around the inbox.
+ * Returns new message objects: `page` and its entries may be frozen.
+ */
+function redactForBot(page: MessagePage, authorisedOwnerId: string | null): MessagePage {
+  const messages = (page.messages as BotReadableMessage[]).map((message) => {
+    if (message.authorId === authorisedOwnerId) return message
+    const { replyToId: _quoted, replyTo: _quotedBody, ...rest } = message
+    // `replyToId` is nullable but required by the resource schema; a quote would
+    // otherwise carry the withheld text back in through a second field.
+    return { ...rest, content: NO_TASK_AUTHORITY_TEXT, attachments: [], replyToId: null }
+  })
+  return { ...page, messages }
+}
+
 export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
   const db = getDb(ctx.env.DB)
   const params = req.nextUrl.searchParams
@@ -116,7 +144,14 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
     viewerId: userId, target: resolved.value, window, tag, contract: COMMUNITY_RESOURCE_CONTRACT_VERSION,
   })
   if (!result.ok) return NextResponse.json({ error: result.error, details: result.details }, { status: result.status })
-  return writeCommunityMessagesRead(req, channelId, result.page)
+  // The enriched projection is chosen by CONTRACT HEADER, not by credential, so a
+  // bot that sends the header lands here with unredacted bodies. Authority is a
+  // property of the caller, not of the response shape: withhold the same fields
+  // the agent arm withholds rather than leaving a header-selectable way around it.
+  const page = ctx.actor.kind === "bot"
+    ? redactForBot(result.page, ctx.actor.ownerUserId)
+    : result.page
+  return writeCommunityMessagesRead(req, channelId, page)
 })
 
 /**

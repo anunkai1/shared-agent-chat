@@ -562,6 +562,7 @@ export type {
   MessageDeliveryPartial,
 } from "./community-message-delivery";
 export type { DispatchOneWakeResult } from "./community/wake-dispatch";
+export { hasTaskAuthority, NO_TASK_AUTHORITY_TEXT } from "./community/task-authority";
 export type { WakePayload, BuildUnreadWakeResult } from "./community/wake-dispatch";
 export { parseQueueTask, parseQueueTaskBatch } from "./community/queue-task";
 export type {
