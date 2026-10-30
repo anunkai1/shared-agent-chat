@@ -104,6 +104,7 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
   const authority = await loadTaskAuthority(db, {
     botUserId,
     botOwnerUserId: gate.bot.ownerUserId,
+    authorIds: page.map((row) => row.authorId),
   })
   const messages = await withD1Retry(
     () => queries.communityAgentInbox.toAgentMessages(

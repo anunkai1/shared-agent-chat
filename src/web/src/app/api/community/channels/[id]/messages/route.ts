@@ -121,6 +121,7 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
     const authority = await loadTaskAuthority(db, {
       botUserId: ctx.actor.userId,
       botOwnerUserId: ctx.actor.ownerUserId,
+      authorIds: items.map((row) => row.authorId),
     })
     const messages = await queries.communityAgentInbox.toAgentMessages(
       db,
@@ -157,15 +158,14 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
   // bot that sends the header lands here with unredacted bodies. Authority is a
   // property of the caller, not of the response shape: withhold the same fields
   // the agent arm withholds rather than leaving a header-selectable way around it.
-  const page = ctx.actor.kind === "bot"
-    ? redactForBot(
-        result.page,
-        await loadTaskAuthority(db, {
-          botUserId: ctx.actor.userId,
-          botOwnerUserId: ctx.actor.ownerUserId,
-        })
-      )
-    : result.page
+  const botAuthority = ctx.actor.kind === "bot"
+    ? await loadTaskAuthority(db, {
+        botUserId: ctx.actor.userId,
+        botOwnerUserId: ctx.actor.ownerUserId,
+        authorIds: (result.page.messages as BotReadableMessage[]).map((m) => m.authorId),
+      })
+    : undefined
+  const page = botAuthority ? redactForBot(result.page, botAuthority) : result.page
   return writeCommunityMessagesRead(req, channelId, page)
 })
 

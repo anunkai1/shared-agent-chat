@@ -59,6 +59,8 @@ export const apiRoutes = [
   "/api/community/bots/[id]/audit-log",
   "/api/community/bots/[id]/avatar",
   "/api/community/bots/[id]/diagnostics",
+  "/api/community/bots/[id]/grants",
+  "/api/community/bots/[id]/grants/[grantId]",
   "/api/community/bots/[id]/marks",
   "/api/community/bots/[id]/notifications/channel/[scopeId]",
   "/api/community/bots/[id]/notifications/server/[scopeId]",

@@ -59,6 +59,7 @@ export const GET = withCommunityActor(async (req, ctx) => {
     const authority = await loadTaskAuthority(db, {
       botUserId: ctx.actor.userId,
       botOwnerUserId: ctx.actor.ownerUserId,
+      authorIds: rows.map((row) => row.message.authorId),
     })
     const marked = await withD1Retry(
       () => queries.communityAgentInbox.toAgentMessages(
