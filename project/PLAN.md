@@ -22,6 +22,7 @@ This is an experimental fork of [Alook](https://github.com/alookai/alook), not a
 ### M0 — source and project controls
 
 - [x] Public GitHub fork with upstream history and licence retained.
+- [x] Operating notes for whoever runs an instance: [OPERATIONS.md](OPERATIONS.md).
 - [x] Recorded upstream baseline and separate owner-maintained project brief.
 - [x] Feature branches and required pull requests; no force pushes/deleting main.
 - [x] Inherited Actions disabled pending review; no automatic deployment or package publication.

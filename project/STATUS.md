@@ -4,9 +4,10 @@ Status date: 30/10/2026. Evaluation revision: `09947e71fa78a67ffc5fa9e6319653aef
 
 ## Current phase
 
-M1 (isolated proof of concept) is **partly complete**, and M2 has started: **owner-only task authority
-is now implemented on the server** (see below). Delegated, expiring grants — the rest of M2 — are still
-planned, not implemented.
+M1 (isolated proof of concept) is **complete**, and M2 is **implemented server-side**: owner-only task
+authority *and* delegated, expiring, revocable grants. What remains of M2 is a user interface for
+granting, runner-side independent enforcement, and cancellation of work already running when a grant is
+revoked. M3 (pilot and deployment) has not started.
 
 Labels used below: **API** — real HTTP with synthetic authenticated accounts; **WS** — real
 WebSocket control plane; **fixture** — a protocol-level machine client that speaks the real
@@ -46,7 +47,7 @@ Pi SDK 1.4.0, a real model and real tool calls. Only the last row is end-to-end 
 | A second chat message in the same session is handled without a respawn, and the agent remembers earlier context. | real runner |
 | Stopping the daemon waits for the session to close, and revoking the machine removes its bot and refuses the credential. | real runner |
 
-### Owner authority — implemented, unit-verified
+### Owner authority and delegated grants — implemented and verified
 
 One predicate decides who may cause a bot to run work: `hasTaskAuthority` in
 `src/shared/src/community/task-authority.ts`. Three gates call it, so the rule cannot drift between
@@ -58,21 +59,25 @@ them:
 | Inbox pull | the message and sender stay visible; text, attachments and reply quotes are withheld |
 | Channel history (bot reads) | same withholding, so re-reading a room is not a way around the inbox |
 | Saved marks (bot reads) | same withholding |
+| Grants | the owner may grant **one named person** authority to task **one bot** until a stated time, optionally in one channel; revoke takes effect on the next wake and the next read |
 
 An ownerless bot wakes for nobody. The enriched message projection is also redacted for bot callers:
 it is chosen by contract header rather than by credential, so without that a bot could have requested the
 richer shape and received unredacted bodies.
 
-Verified two ways: unit tests for `hasTaskAuthority`, the wake gate and the withholding — shared suite
-2,482 tests green, `tsc` clean for shared and web — and **end to end against a running instance**, where
-26/26 protocol checks pass, including "a non-owner message does not wake the owner's bot" and "the owner's
-bot cannot obtain a non-owner's text through its inbox, its history or by asking for the richer shape".
+Verified two ways: unit tests for the rule, the wake gate, the withholding and grant expiry — and
+**end to end against a running instance**, where **37/37** protocol checks pass. Those include: a
+non-owner message does not wake the owner's bot; its text is withheld from the inbox, from a history
+re-read and from the richer response shape; a non-owner cannot grant; a live grant wakes the bot and
+makes that person's text readable; a channel-scoped grant does not authorise another channel; revoke
+stops both wake and read immediately; expiry does the same; and the owner view reports `live` and
+`effective` from the same predicate the enforcement points use.
 
 ### What does not work yet
 
 | Result | Method |
 |---|---|
-| There is no delegated access: a second person cannot be granted authority even temporarily, and there is nothing to expire or revoke. | by construction |
+| There is no grant management interface: grants exist as an API (`POST`/`GET`/`DELETE` on a bot's `grants`), usable by the owner only, but not yet surfaced in the web UI. | by construction |
 | The runner trusts the server's decision. A compromised or malicious server could still deliver text the runner would act on. | source inspection |
 | A slow model's first turn is aborted unless the daemon's startup watchdog is raised — **fixed** in `94d9100`, where the SDK lane now reports readiness when it opens rather than when the model first speaks. | real runner |
 | The local development stack returns intermittent HTTP 500/503 from SQLite contention, so some test steps need retries. | API |

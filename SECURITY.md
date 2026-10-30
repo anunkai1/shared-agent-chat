@@ -1,6 +1,6 @@
 # Security status and reporting
 
-This is an experimental fork of Alook. **Owner-only task authority is implemented server-side** (see below). Time-limited delegated access is still planned, not implemented. Do not connect unrestricted personal agent environments or use this fork for sensitive production work on the basis of the project plan.
+This is an experimental fork of Alook. **Owner-only task authority and delegated, expiring, revocable grants are implemented server-side** (see below). Do not connect unrestricted personal agent environments or use this fork for sensitive production work on the basis of the project plan.
 
 ## Owner authority (implemented server-side)
 
@@ -9,11 +9,17 @@ A chat message, a mention or channel membership is not permission to task somebo
 - **Wake production** skips any unread whose author is not the bot's owner (`no_task_authority`).
 - **Bot-facing reads** — inbox pulls and channel history — keep the message and its sender visible but withhold the text, attachments and reply quotes of anything the bot may not obey.
 - **An ownerless bot wakes for nobody.** No owner means no authority holder; the rule fails closed.
+- **Grants** let the owner give one named person authority over one bot until a stated time, optionally
+  inside one channel. A grant is to a person, never to a bot, so an agent cannot inherit it. It confers
+  task authority only — not configuration, not the ability to grant further. Revocation is a column
+  write: the next wake and the next read both refuse, with no cache to expire.
 
 What this does **not** do:
 
 - The runner still trusts the server's decision. There is no independent runner-side check yet, so a compromised server could still deliver text the runner would act on.
-- No delegated grants, expiry or revocation. Only the owner, always.
+- No grant interface in the web UI yet; granting is an owner-only API call.
+- A running task is not cancelled when a grant is revoked: new and queued work stops, but work already
+  executing is not interrupted and completed side effects cannot be undone.
 - No protection against prompt injection from content the bot may legitimately read.
 - External side effects already performed cannot be undone.
 
