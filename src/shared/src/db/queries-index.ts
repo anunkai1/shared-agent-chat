@@ -54,6 +54,7 @@ export * as communityBot from "./queries/community/bot";
 export * as communityBotCreation from "./queries/community/bot-creation";
 export * as communityAgentInbox from "./queries/community/agent-inbox";
 export * as communityBotAuditLog from "./queries/community/bot-audit-log";
+export * as communityGrant from "./queries/community/grant";
 export * as communityMessageTag from "./queries/community/message-tag";
 export * as communityDiagnosticReport from "./queries/community/diagnostic-report";
 export * as communityFunnelAnalytics from "./queries/community/funnel-analytics";

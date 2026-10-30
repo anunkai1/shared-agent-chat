@@ -22,6 +22,11 @@ vi.mock("../../src/db/queries/community/bot-audit-log", () => ({
   insertBotAuditWakeTrigger: (...a: unknown[]) => mockInsertBotAuditWakeTrigger(...a),
 }));
 
+const mockListActiveGrantsForBot = vi.fn(async () => []);
+vi.mock("../../src/db/queries/community/grant", () => ({
+  listActiveGrantsForBot: (...a: unknown[]) => mockListActiveGrantsForBot(...a),
+}));
+
 const mockGetUsersByIds = vi.fn();
 vi.mock("../../src/db/queries/user", () => ({
   getUsersByIds: (...a: unknown[]) => mockGetUsersByIds(...a),
@@ -502,5 +507,49 @@ describe("buildUnreadWakeCommand — author authority", () => {
     seedHappyPath();
     const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
     expect(result.state).toBe("ready");
+  });
+});
+
+describe("buildUnreadWakeCommand — delegated grants", () => {
+  const inFuture = () => new Date(Date.now() + 30 * 60_000).toISOString();
+  const inPast = () => new Date(Date.now() - 1_000).toISOString();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListActiveGrantsForBot.mockResolvedValue([]);
+  });
+
+  it("wakes for a grantee while the grant is live", async () => {
+    seedHappyPath({ message: { authorId: "u_alice" } });
+    mockListActiveGrantsForBot.mockResolvedValue([
+      { granteeUserId: "u_alice", channelId: null, expiresAt: inFuture(), revokedAt: null },
+    ]);
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result.state).toBe("ready");
+  });
+
+  it("does not wake for a grantee whose grant expired", async () => {
+    seedHappyPath({ message: { authorId: "u_alice" } });
+    mockListActiveGrantsForBot.mockResolvedValue([
+      { granteeUserId: "u_alice", channelId: null, expiresAt: inPast(), revokedAt: null },
+    ]);
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result).toEqual({ state: "skip", reason: "no_task_authority" });
+  });
+
+  it("does not wake a grant scoped to another channel", async () => {
+    seedHappyPath({ message: { authorId: "u_alice" } });
+    mockListActiveGrantsForBot.mockResolvedValue([
+      { granteeUserId: "u_alice", channelId: "ch_other", expiresAt: inFuture(), revokedAt: null },
+    ]);
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result).toEqual({ state: "skip", reason: "no_task_authority" });
+  });
+
+  it("never looks up grants for the owner's own message", async () => {
+    seedHappyPath();
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result.state).toBe("ready");
+    expect(mockListActiveGrantsForBot).not.toHaveBeenCalled();
   });
 });

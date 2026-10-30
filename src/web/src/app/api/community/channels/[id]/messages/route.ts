@@ -9,7 +9,7 @@ import { readCommunityConversationEntry } from "@/lib/community/conversation-ent
 import { writeCommunityMessagesRead, writeCommunityConversationEntryRead } from "@/lib/community/read-contract"
 import { resolveMessageTarget } from "@/lib/community/message-door"
 import { handleHumanSend, handleBotSend } from "@/lib/community/message-send.server"
-import { NO_TASK_AUTHORITY_TEXT } from "@alook/shared"
+import { NO_TASK_AUTHORITY_TEXT, loadTaskAuthority } from "@alook/shared"
 import type { MessagePage } from "@/lib/community/read-contract"
 
 // A bot addresses by ref-in-body; the path `[id]` is then a placeholder
@@ -58,9 +58,10 @@ type BotReadableMessage = {
  * the agent arm withholds — otherwise a header would be a way around the inbox.
  * Returns new message objects: `page` and its entries may be frozen.
  */
-function redactForBot(page: MessagePage, authorisedOwnerId: string | null): MessagePage {
+function redactForBot(page: MessagePage, authority: { mayTask(authorId: string, channelId: string): boolean }): MessagePage {
   const messages = (page.messages as BotReadableMessage[]).map((message) => {
-    if (message.authorId === authorisedOwnerId) return message
+    const channelId = (message as { channelId?: string }).channelId ?? page.surfaceReceipt.channelId
+    if (message.authorId && authority.mayTask(message.authorId, channelId)) return message
     const { replyToId: _quoted, replyTo: _quotedBody, ...rest } = message
     // `replyToId` is nullable but required by the resource schema; a quote would
     // otherwise carry the withheld text back in through a second field.
@@ -117,9 +118,17 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
       { channelId },
       readParams,
     )
-    const messages = await queries.communityAgentInbox.toAgentMessages(db, items, ctx.actor.userId, undefined, {
-      taskAuthorityUserId: ctx.actor.ownerUserId,
+    const authority = await loadTaskAuthority(db, {
+      botUserId: ctx.actor.userId,
+      botOwnerUserId: ctx.actor.ownerUserId,
     })
+    const messages = await queries.communityAgentInbox.toAgentMessages(
+      db,
+      items,
+      ctx.actor.userId,
+      undefined,
+      authority
+    )
     return NextResponse.json({ items: messages, hasMore, ...(latestSeq !== undefined ? { latestSeq } : {}) })
   }
 
@@ -149,7 +158,13 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
   // property of the caller, not of the response shape: withhold the same fields
   // the agent arm withholds rather than leaving a header-selectable way around it.
   const page = ctx.actor.kind === "bot"
-    ? redactForBot(result.page, ctx.actor.ownerUserId)
+    ? redactForBot(
+        result.page,
+        await loadTaskAuthority(db, {
+          botUserId: ctx.actor.userId,
+          botOwnerUserId: ctx.actor.ownerUserId,
+        })
+      )
     : result.page
   return writeCommunityMessagesRead(req, channelId, page)
 })

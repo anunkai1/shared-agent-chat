@@ -2,6 +2,7 @@ import type { HostCommand, UnreadNotice } from "../community-cli-contract";
 import { makeRuntimeConfig } from "../runtime-config";
 import { resolveModelConfig } from "./bot-model";
 import { hasTaskAuthority } from "./task-authority";
+import * as grant from "../db/queries/community/grant";
 import { formatHandle } from "../lib/discriminator";
 import { utcDayKey } from "../utils/day-key";
 import * as message from "../db/queries/community/message";
@@ -190,7 +191,17 @@ export async function buildUnreadWakeCommand(
   // Author authority comes first: a channel can be read without granting the
   // right to cause work, so membership, notification level and unread state are
   // all downstream of this and cannot substitute for it.
-  if (!hasTaskAuthority({ botOwnerUserId: botCtx.ownerUserId, authorId: msg.authorId })) {
+  const nowMs = Date.now();
+  const grants = botCtx.ownerUserId === msg.authorId
+    ? []
+    : await grant.listActiveGrantsForBot(db, input.botUserId, new Date(nowMs).toISOString());
+  if (!hasTaskAuthority({
+    botOwnerUserId: botCtx.ownerUserId,
+    authorId: msg.authorId,
+    channelId: msg.channelId,
+    grants,
+    nowMs,
+  })) {
     return { state: "skip", reason: "no_task_authority" };
   }
   const policyByUser = await notificationEligibility.resolveNotificationEligibilityForUsers(
