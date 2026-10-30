@@ -70,6 +70,7 @@ export function communityWriteDb() {
     INSERT INTO community_channel (id, type, created_at) VALUES ('channel', 'text', 'now');
   `);
   sqlite.exec(readFileSync(new URL("../../../web/migrations/0106_community_attachment_reuse.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../../web/migrations/0111_community_bot_grant.sql", import.meta.url), "utf8"));
   const orm = drizzle(sqlite);
   const batchSizes: number[][] = [];
   const db = orm as unknown as Database;

@@ -9,8 +9,8 @@ import { readCommunityConversationEntry } from "@/lib/community/conversation-ent
 import { writeCommunityMessagesRead, writeCommunityConversationEntryRead } from "@/lib/community/read-contract"
 import { resolveMessageTarget } from "@/lib/community/message-door"
 import { handleHumanSend, handleBotSend } from "@/lib/community/message-send.server"
-import { NO_TASK_AUTHORITY_TEXT, loadTaskAuthority } from "@alook/shared"
-import type { MessagePage } from "@/lib/community/read-contract"
+import { CommunityMessageResourceSchema, loadTaskAuthority } from "@alook/shared"
+import { redactBotMessage } from "@/lib/community/bot-message-policy"
 
 // A bot addresses by ref-in-body; the path `[id]` is then a placeholder
 // (`channels/resolve/messages`) since a ref carries `/` and can't sit in a path
@@ -43,35 +43,8 @@ function parseIntParam(raw: string | null): number | undefined {
  * create-if-missing (structurally, not just create=false — Aigneis #246 ⑤); a
  * ref to a nonexistent target is a 404, not a read-then-create.
  */
-type BotReadableMessage = {
-  authorId?: string
-  content?: string
-  attachments?: unknown[]
-  replyToId?: string | null
-  replyTo?: unknown
-}
-
-/**
- * The enriched projection is selected by CONTRACT HEADER, not by credential, so a
- * bot that sends the header lands on it with unredacted bodies. Authority is a
- * property of the caller, not of the response shape, so withhold here exactly what
- * the agent arm withholds — otherwise a header would be a way around the inbox.
- * Returns new message objects: `page` and its entries may be frozen.
- */
-function redactForBot(page: MessagePage, authority: { mayTask(authorId: string, channelId: string): boolean }): MessagePage {
-  const messages = (page.messages as BotReadableMessage[]).map((message) => {
-    const channelId = (message as { channelId?: string }).channelId ?? page.surfaceReceipt.channelId
-    if (message.authorId && authority.mayTask(message.authorId, channelId)) return message
-    const { replyToId: _quoted, replyTo: _quotedBody, ...rest } = message
-    // `replyToId` is nullable but required by the resource schema; a quote would
-    // otherwise carry the withheld text back in through a second field.
-    return { ...rest, content: NO_TASK_AUTHORITY_TEXT, attachments: [], replyToId: null }
-  })
-  return { ...page, messages }
-}
-
 export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
-  const db = getDb(ctx.env.DB)
+  const db = ctx.actor.kind === "bot" ? getPrimaryDb(ctx.env.DB) : getDb(ctx.env.DB)
   const params = req.nextUrl.searchParams
 
   // Single authorization entry, shared by both arms. Human: id from the path.
@@ -158,15 +131,19 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
   // bot that sends the header lands here with unredacted bodies. Authority is a
   // property of the caller, not of the response shape: withhold the same fields
   // the agent arm withholds rather than leaving a header-selectable way around it.
-  const botAuthority = ctx.actor.kind === "bot"
-    ? await loadTaskAuthority(db, {
-        botUserId: ctx.actor.userId,
-        botOwnerUserId: ctx.actor.ownerUserId,
-        authorIds: (result.page.messages as BotReadableMessage[]).map((m) => m.authorId),
-      })
-    : undefined
-  const page = botAuthority ? redactForBot(result.page, botAuthority) : result.page
-  return writeCommunityMessagesRead(req, channelId, page)
+  if (ctx.actor.kind === "bot") {
+    const messages = result.page.messages.map((message) => CommunityMessageResourceSchema.parse(message))
+    const authority = await loadTaskAuthority(db, {
+      botUserId: ctx.actor.userId,
+      botOwnerUserId: ctx.actor.ownerUserId,
+      authorIds: messages.flatMap((message) => [message.authorId, message.replyTo?.authorId]),
+    })
+    return writeCommunityMessagesRead(req, channelId, {
+      ...result.page,
+      messages: messages.map((message) => redactBotMessage(message, authority)),
+    })
+  }
+  return writeCommunityMessagesRead(req, channelId, result.page)
 })
 
 /**

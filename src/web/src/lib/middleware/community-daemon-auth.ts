@@ -46,7 +46,7 @@ export function withCommunityDaemonAuth(handler: CommunityDaemonAuthenticatedHan
 
     const { env } = await getCloudflareContext({ async: true })
     const cloudflareEnv = env as Env
-    const db = getDb(cloudflareEnv.DB)
+    const db = getDb(cloudflareEnv.DB, "first-primary")
 
     const active = await withD1Retry(
       () => queries.communityMachine.findActiveCredentialByBearer(db, raw),

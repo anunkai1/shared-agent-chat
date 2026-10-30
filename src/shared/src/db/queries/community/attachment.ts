@@ -5,6 +5,7 @@ import { user } from "../../schema";
 import type { Database } from "../../index";
 import { chunk, D1_MAX_IN_PARAMS } from "../_chunk";
 import { messageChannelReadableSql } from "./channel";
+import { taskAuthoritySql } from "./grant";
 
 export async function createAttachment(db: Database, data: typeof communityAttachment.$inferInsert) {
   const [row] = await db.insert(communityAttachment).select(db.select({
@@ -24,11 +25,16 @@ export async function createAttachment(db: Database, data: typeof communityAttac
 }
 
 export function attachmentReadableSql(db: Database, userId: string) {
+  const mayReadMessage = db.select({ id: user.id }).from(user).where(and(
+    eq(user.id, userId),
+    or(eq(user.isBot, false), taskAuthoritySql(db, userId, user.ownerUserId, new Date().toISOString()))
+  ));
   const readableMessage = db.select({ id: communityMessage.id }).from(communityMessageAttachment)
     .innerJoin(communityMessage, eq(communityMessage.id, communityMessageAttachment.messageId))
     .innerJoin(communityChannel, eq(communityChannel.id, communityMessage.channelId))
     .where(and(eq(communityMessageAttachment.attachmentId, communityAttachment.id),
-      messageChannelReadableSql(db, userId, { id: communityChannel.id, type: communityChannel.type, serverId: communityChannel.serverId, parentChannelId: communityChannel.parentChannelId })));
+      messageChannelReadableSql(db, userId, { id: communityChannel.id, type: communityChannel.type, serverId: communityChannel.serverId, parentChannelId: communityChannel.parentChannelId }),
+      exists(mayReadMessage)));
   const activeActor = db.select({ id: user.id }).from(user)
     .where(and(eq(user.id, userId), isNull(user.deletedAt)));
   return and(exists(activeActor), or(eq(communityAttachment.uploaderId, userId), exists(readableMessage)))!;

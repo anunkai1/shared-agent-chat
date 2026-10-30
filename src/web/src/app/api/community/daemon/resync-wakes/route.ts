@@ -24,7 +24,7 @@ import { withCommunityDaemonAuth } from "@/lib/middleware/community-daemon-auth"
  * socket this time and delivers immediately.
  */
 export const POST = withCommunityDaemonAuth(async (_req, ctx) => {
-  const db = getDb(ctx.env.DB)
+  const db = getDb(ctx.env.DB, "first-primary")
   const wakeEnv = {
     WS_DO_WORKER: {
       fetch(input: string, init: RequestInit = {}) {

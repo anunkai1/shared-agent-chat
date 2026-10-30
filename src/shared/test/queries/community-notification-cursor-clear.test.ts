@@ -48,11 +48,14 @@ describe("notification setting read-state isolation contract", () => {
         name TEXT NOT NULL DEFAULT '',
         discriminator TEXT NOT NULL DEFAULT '0000',
         image TEXT,
-        deleted_at TEXT
+        deleted_at TEXT,
+        ownerUserId TEXT
       );
+      CREATE TABLE community_bot_grant (id TEXT,bot_user_id TEXT,granted_by_user_id TEXT,grantee_user_id TEXT,channel_id TEXT,expires_at TEXT,revoked_at TEXT);
       INSERT INTO user (id, name, discriminator) VALUES
         ('u', 'Bot', '0001'),
         ('author', 'Human', '0002');
+      UPDATE user SET ownerUserId = 'author' WHERE id = 'u';
       CREATE TABLE community_server (
         official INTEGER NOT NULL DEFAULT 0,
         id TEXT PRIMARY KEY,

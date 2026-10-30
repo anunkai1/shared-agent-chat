@@ -42,6 +42,7 @@ vi.mock("./auth", () => ({
 }))
 
 import { withCommunityActor, rejectBot, requireBot, type CommunityActor } from "./community-actor"
+import { getDb } from "@/lib/db"
 
 const handler = vi.fn(async (_req: NextRequest, ctx: any) => NextResponse.json({ ok: true, actor: ctx.actor }))
 
@@ -64,6 +65,7 @@ describe("withCommunityActor", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { actor: CommunityActor }
     expect(body.actor).toEqual({ kind: "bot", userId: "bot_1", ownerUserId: "owner_1", machineId: "m_1", isActive: true })
+    expect(getDb).toHaveBeenCalledWith({}, "first-primary")
   })
 
   it("a crk_ bearer that fails to resolve returns the error response and NEVER falls through to human", async () => {

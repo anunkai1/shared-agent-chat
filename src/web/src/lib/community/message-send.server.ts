@@ -117,6 +117,7 @@ export async function handleBotSend(
     return NextResponse.json({ error: "invalid payload", details: flattenError(parsed.error) }, { status: 400 })
   }
   const body = parsed.data
+  const ownMessageAuthority = { mayTask: (authorId: string) => authorId === botUserId }
 
   const descriptor: MessageTargetDescriptor = {
     ref: body.channel,
@@ -159,7 +160,7 @@ export async function handleBotSend(
     if (target.kind === "forum") {
       const created = await createForumOpener(target.serverId)
       if (!created.ok) return NextResponse.json({ error: created.error }, { status: created.status })
-      const message = await queries.communityAgentInbox.toAgentMessage(db, created.message, botUserId)
+      const message = await queries.communityAgentInbox.toAgentMessage(db, created.message, botUserId, undefined, ownMessageAuthority)
       return NextResponse.json({
         state: "sent",
         message,
@@ -168,7 +169,7 @@ export async function handleBotSend(
       })
     }
     const orderedAttachments = replay.attachments.map((a) => ({ id: a.id, filename: a.filename, contentType: a.contentType, size: a.size }))
-    const message = await queries.communityAgentInbox.toAgentMessage(db, replay.row, botUserId, orderedAttachments)
+    const message = await queries.communityAgentInbox.toAgentMessage(db, replay.row, botUserId, orderedAttachments, ownMessageAuthority)
     return NextResponse.json({ state: "sent", message, deduped: true })
   }
   const replay = await replayResponse()
@@ -241,7 +242,7 @@ export async function handleBotSend(
       }
       return NextResponse.json({ error: created.error }, { status: created.status })
     }
-    const message = await queries.communityAgentInbox.toAgentMessage(db, created.message, botUserId)
+    const message = await queries.communityAgentInbox.toAgentMessage(db, created.message, botUserId, undefined, ownMessageAuthority)
     return NextResponse.json({
       state: "sent",
       message,
@@ -288,6 +289,6 @@ export async function handleBotSend(
   }
 
   const orderedAttachments = (result.attachments ?? []).map((a) => ({ id: a.id, filename: a.filename, contentType: a.contentType, size: a.size }))
-  const message = await queries.communityAgentInbox.toAgentMessage(db, result.row, botUserId, orderedAttachments)
+  const message = await queries.communityAgentInbox.toAgentMessage(db, result.row, botUserId, orderedAttachments, ownMessageAuthority)
   return NextResponse.json({ state: "sent", message, deduped: result.deduped })
 }

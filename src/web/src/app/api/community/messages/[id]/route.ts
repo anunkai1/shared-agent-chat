@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 import { withCommunityActor } from "@/lib/middleware/community-actor"
 import { writeJSON, writeError } from "@/lib/middleware/helpers"
 import { getDb, getPrimaryDb } from "@/lib/db"
-import { canManageServer, queries, WS_EVENTS } from "@alook/shared"
+import { canManageServer, queries, WS_EVENTS, loadTaskAuthority } from "@alook/shared"
 import {
   requireChannelMember,
   requireDMAccess,
@@ -51,10 +51,10 @@ const REF_PLACEHOLDER_ID = "resolve"
  * own surface); only the projection differs.
  */
 export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
-  const db = getDb(ctx.env.DB)
+  const db = ctx.actor.kind === "bot" ? getPrimaryDb(ctx.env.DB) : getDb(ctx.env.DB)
 
   if (ctx.actor.kind === "bot") {
-    return handleBotResolve(db, ctx.actor.userId, req)
+    return handleBotResolve(db, ctx.actor.userId, ctx.actor.ownerUserId, req)
   }
   return handleHumanGet(db, ctx.actor.userId, ctx.params?.id, COMMUNITY_RESOURCE_CONTRACT_VERSION)
 })
@@ -193,6 +193,7 @@ async function handleHumanGet(
 async function handleBotResolve(
   db: ReturnType<typeof getDb>,
   botUserId: string,
+  botOwnerUserId: string,
   req: NextRequest,
 ) {
   const params = req.nextUrl.searchParams
@@ -237,6 +238,7 @@ async function handleBotResolve(
     size: a.size,
   }))
 
-  const message = await queries.communityAgentInbox.toAgentMessage(db, row, botUserId, attachments)
+  const authority = await loadTaskAuthority(db, { botUserId, botOwnerUserId, authorIds: [row.authorId] })
+  const message = await queries.communityAgentInbox.toAgentMessage(db, row, botUserId, attachments, authority)
   return writeJSON({ message })
 }

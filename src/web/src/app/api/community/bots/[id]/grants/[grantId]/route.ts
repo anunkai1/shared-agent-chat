@@ -1,15 +1,13 @@
 import { queries } from "@alook/shared"
-import { getDb } from "@/lib/db"
+import { getPrimaryDb as getDb } from "@/lib/db"
 import { withAuth } from "@/lib/middleware/auth"
 import { writeJSON, writeError } from "@/lib/middleware/helpers"
 
 /**
  * DELETE /api/community/bots/{id}/grants/{grantId} — revoke now.
  *
- * Revocation is a write on the grant row, so the next wake decision and the next
- * bot-facing read both refuse: there is no cache to expire and nothing to
- * restart. Work already running is a separate concern — the server stops
- * queuing it, and completed side effects cannot be undone.
+ * Subsequent server decisions recheck the row. This does not invalidate runner
+ * admissions/queues, cancel running turns or undo completed side effects.
  */
 export const DELETE = withAuth(async (_req, ctx) => {
   const id = ctx.params?.id as string
