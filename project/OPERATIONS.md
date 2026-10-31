@@ -19,8 +19,10 @@ Two rules come before everything else: **recovery needs the database, uploaded o
    separately verify rollback. Do not assume database migrations are reversible.
 3. **Owner-only or granted, never ambient.** Membership of a channel grants reading. It does not grant
    the right to task somebody's agent. If your deployment reports otherwise, the version you are
-   running has an incomplete or bypassed authority boundary. Even current server filters do not clear
-   runner queues or cancel delegated turns after revocation; do not start a real-agent pilot yet.
+   running has an incomplete or bypassed authority boundary. Revocation reaches the runner as a nudge
+   and a recheck, drops queued delegated work and asks a running delegated turn to stop at its next
+   boundary — but nothing already executed is undone, and a runner that was offline when the nudge
+   was sent only converges when it reconnects. Do not start a real-agent pilot yet.
 4. **Runners are restricted environments.** A bot's runner is where arbitrary code actually executes.
    Give it a disposable workspace, no personal credential store, no host socket, no broad home mount,
    and a network path that reaches only what the task needs.

@@ -51,8 +51,8 @@ M1 passes only when there is enough evidence to choose a foundation. It is not p
 - [x] Add regression tests for missing/ownerless policies, single-message reads, quotes, attachment revoke/expiry, malformed grants and authorised reconnect selection.
 - [ ] Verify the changed revision through a fresh-image live protocol run. Historical 37/37 fixtures did not cover all bypasses or runner cancellation and used a source overlay on an older image.
 - [ ] Grant/revoke user interface. The owner-only API exists; the interface is not built.
-- [ ] Independent runner admission and queued-work revalidation, preserving author/grant/expiry provenance. Honest-server enforcement does not itself require signatures; malicious-server resistance is a separate design.
-- [ ] Selective queued/running delegated-work cancellation on revoke/expiry, preserving owner work. Existing server filtering does not implement this.
+- [x] Runner admission and queued-work revalidation preserving author/grant/expiry provenance: task source on every wake, server recheck with short leases, driver-level authorization at admission, safe boundary and on a periodic sweep. Honest-server enforcement only; malicious-server resistance is a separate design.
+- [x] Selective queued/running delegated-work cancellation on revoke/expiry preserving owner work: revoked queued work fails as `task_authority_revoked`, one best-effort interrupt for a running delegated turn, owner work untouched, revoke nudges the owning machine. Unit/fixture coverage only — no live runtime interrupted yet.
 - [ ] Address permissive runtime launch defaults (Claude/Codex approval bypass) and local execution restrictions for runners.
 
 ### M3 — restricted pilot and deployment
