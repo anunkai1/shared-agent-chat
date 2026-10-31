@@ -1,4 +1,5 @@
 import { PiiCommandSchema, type PiiCommand, type PiiResultFrame } from "./pii-contract";
+import { TaskSourceSchema } from "./community/task-source";
 import type { PlatformMachineRequest, PlatformBotRequest } from "./community-platform";
 /**
  * Server API contract — the agent ⇄ server boundary.
@@ -800,6 +801,7 @@ export type HostCommand =
     launchId: string;
     /** The bodiless unread signal — the daemon prompts "pull your inbox". */
     unreadNotice: UnreadNotice;
+    taskSource?: import("./community/task-source").TaskSource;
   }
   | {
     /** Server-originated text delivered directly to one agent. */
@@ -814,6 +816,7 @@ export type HostCommand =
      */
     includeRecentContext?: boolean;
   }
+  | { type: "agent:authority_changed"; agentId: AgentId }
   | { type: "agent:stop"; agentId: AgentId }
   /**
    * Owner-triggered reset. Carries `config` because the daemon may not have
@@ -1496,6 +1499,7 @@ export function formatSeq(seq: Seq): string {
 // downstream with its own defaulting, so deep-validating it here would only turn
 // a forward-compatible server field into a hard drop on an older daemon.
 export const HostCommandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("agent:authority_changed"), agentId: z.string().min(1) }),
   RuntimeModelDiscoveryCommandSchema,
   PiiCommandSchema,
   z.strictObject({
@@ -1509,6 +1513,7 @@ export const HostCommandSchema = z.discriminatedUnion("type", [
     sessionId: z.string().optional(),
     launchId: z.string().min(1),
     unreadNotice: z.unknown(),
+    taskSource: TaskSourceSchema.optional(),
   }),
   z.object({
     type: z.literal("agent:event"),

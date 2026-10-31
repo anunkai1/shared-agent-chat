@@ -899,6 +899,8 @@ export async function listBotsForMachine(
     description: string;
     ownerName: string;
     ownerDiscriminator: string;
+    /** The bot's actual owner — a machine may not host only its pairer's bots. */
+    ownerUserId: string;
     runtime: string;
     modelName: string | null;
     reasoningEffort: ReasoningEffort | null;
@@ -916,6 +918,7 @@ export async function listBotsForMachine(
       description: communityBotBinding.instruction,
       ownerName: owner.name,
       ownerDiscriminator: owner.discriminator,
+      ownerUserId: owner.id,
       runtime: communityBotBinding.runtime,
       modelName: communityBotBinding.modelName,
       reasoningEffort: communityBotBinding.reasoningEffort,
@@ -940,6 +943,7 @@ export async function listBotsForMachine(
     description: r.description ?? "",
     ownerName: r.ownerName,
     ownerDiscriminator: r.ownerDiscriminator,
+    ownerUserId: r.ownerUserId,
     runtime: r.runtime,
     modelName: r.modelName ?? null,
     reasoningEffort: r.reasoningEffort ?? null,

@@ -25,6 +25,7 @@ import { getDriver, type AgentBackend } from "../drivers/index.js";
 import type { AgentProcessManager } from "./managerRuntime.js";
 import type { TypingScopeTracker } from "./typingScopeTracker.js";
 import { createLogger, type Logger } from "../logger.js";
+import { TaskAuthorityRevokedError } from "../daemon/taskAuthority.js";
 
 type ModelDiscovery = Awaited<ReturnType<AgentBackend["discoverModels"]>> | null;
 
@@ -65,6 +66,7 @@ function classifyErrorCode(err: unknown): string {
   if (err instanceof UnknownBotError) return "bot_unknown";
   if (err instanceof BotEnrollFailedError) return "bot_enroll_failed";
   if (err instanceof UnknownRuntimeError) return "bot_runtime_missing";
+  if (err instanceof TaskAuthorityRevokedError) return "task_authority_revoked";
   return "internal_error";
 }
 
@@ -98,6 +100,8 @@ export interface AgentRouterOpts {
    * vouchers. Must complete before the agent is spawned.
    */
   onBeforeAgent?: (agentId: string) => Promise<void>;
+  authorizeWake?: (command: Extract<HostCommand, { type: "agent:wake" }>) => Promise<import("@alook/agent-driver").AgentMessage["authorization"]>;
+  onAuthorityChanged?: (agentId: string) => Promise<void>;
   /**
    * Expands an `agent:event` that explicitly opts into daemon-local recent
    * context. The normal absent/false event path never calls this seam.
@@ -514,6 +518,9 @@ export class AgentRouter {
         }
         return;
       }
+      case "agent:authority_changed":
+        await this.opts.onAuthorityChanged?.(cmd.agentId);
+        break;
       case "agent:wake":
         this.log.info("agent:wake received", {
           agentId: cmd.agentId,
@@ -534,6 +541,7 @@ export class AgentRouter {
             this.opts.manager.snapshot?.().agents?.[cmd.agentId]?.status ?? "unregistered";
           const wasActive = this.opts.typingTracker?.hasAny(cmd.agentId) ?? false;
           await this.opts.onBeforeAgent?.(cmd.agentId);
+          const authorization = await this.opts.authorizeWake?.(cmd);
           this.opts.manager.register(cmd.agentId, {
             runtimeConfig: cmd.config,
             sessionId: cmd.sessionId,
@@ -554,6 +562,7 @@ export class AgentRouter {
             id: `${cmd.agentId}:wake:${cmd.unreadNotice.channel}:${cmd.unreadNotice.latestSeq}:admission:${this.nextWakeAdmissionOrdinal++}`,
             seq: cmd.unreadNotice.latestSeq,
             text,
+            authorization,
           });
           // Honest-ack diagnostic: a wake that produced NO executable effect was only
           // coalesced into the inbox. Coalescing is BENIGN and routine for the

@@ -8,6 +8,8 @@ import type { ChildProcess } from "node:child_process";
 import type {
   AgentDriverError,
   AgentEvent,
+  AgentExecutionPolicy,
+  AgentMessage,
   BackendCapabilities,
   BuiltinBackendId,
   BuiltinBackendSpecs,
@@ -294,6 +296,7 @@ function makeSession<Id extends BuiltinBackendId>(
     capabilities?: BackendCapabilities;
     promptAdmissionTimeoutMs?: number;
     now?: () => number;
+    executionPolicy?: AgentExecutionPolicy;
   } = {},
 ) {
   const driver = new FakeDriver(backend, options.execution ?? executionFor(backend));
@@ -325,6 +328,7 @@ function makeSession<Id extends BuiltinBackendId>(
     host,
     prepared,
     options.timeout ?? 100,
+    options.executionPolicy,
   );
   return { session, driver, host };
 }
@@ -2384,3 +2388,118 @@ describe("logical-session terminal facts", () => {
     expect(prepared.release).toHaveBeenCalledOnce();
   });
 });
+
+describe("LogicalAgentSession execution policy", () => {
+  const task = (id: string, delegated: boolean): AgentMessage => ({
+    id,
+    kind: "user",
+    text: delegated ? `delegated ${id}` : `owner ${id}`,
+    authorization: delegated
+      ? {
+        principal: "grant:grant_1",
+        data: { messageId: id, authorUserId: "guest", channelId: "ch_1", grantId: "grant_1", expiresAt: new Date(Date.now() + 60_000).toISOString() },
+      }
+      : {
+        principal: "owner",
+        data: { messageId: id, authorUserId: "owner", channelId: "ch_1", grantId: null, expiresAt: null },
+      },
+  });
+  const delegatedTask = (id: string) => task(id, true);
+  const ownerTask = (id: string) => task(id, false);
+
+  function setup(backend: "cursor" | "codex", denied: Set<string>) {
+    const lane = new ControlledRuntimeLane();
+    lane.interrupt.mockResolvedValue(true);
+    lane.startAdmission = { ok: true, acceptedAs: "prompt", receipt: `${backend}:test:1` };
+    const started: string[] = [];
+    const sent: string[] = [];
+    lane.onStart = (input) => { started.push(input.text); };
+    lane.onSend = (input) => { sent.push(input.text); };
+    const active = vi.fn();
+    const policy: AgentExecutionPolicy = {
+      authorize: async (message: AgentMessage) => !denied.has(message.id),
+      onActiveMessages: active,
+      checkIntervalMs: 60_000,
+    };
+    const made = makeSession(backend, { lane, executionPolicy: policy });
+    // Every delivery must report the terminal owner the driver prepared, so
+    // the receipt stays honest whether it starts a turn or steers the current one.
+    lane.sendImpl = async () => ({
+      ok: true,
+      acceptedAs: "prompt",
+      receipt: made.driver.currentTerminalOwner ?? `${backend}:test:1`,
+    });
+    return { lane, started, sent, active, ...made };
+  }
+
+  it("refuses an unauthorised root turn before the lane ever sees it", async () => {
+    const { lane, started, host, session } = setup("codex", new Set(["delegated"]));
+
+    const receipt = await session.start(delegatedTask("delegated"));
+
+    expect(receipt).toMatchObject({ status: "rejected", error: { code: "task_authority_revoked" } });
+    expect(started).toEqual([]);
+    // Nothing was executed yet, so the session is not left half-open.
+    await vi.waitFor(() => expect(host.releases.length).toBe(1));
+    expect(lane.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("queues a different principal instead of steering it into the active turn", async () => {
+    const { started, sent, lane, session } = setup("cursor", new Set());
+
+    await expect(session.start(delegatedTask("delegated"))).resolves.toMatchObject({ status: "accepted" });
+    await expect(session.send(ownerTask("owner"))).resolves.toMatchObject({ status: "queued" });
+
+    expect(started).toEqual(["delegated delegated"]);
+    expect(sent).toEqual([]);
+    expect(lane.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("drops revoked queued work without touching the owner's running turn", async () => {
+    const denied = new Set<string>();
+    const { lane, started, session } = setup("codex", denied);
+    const events = session.events[Symbol.asyncIterator]();
+
+    await expect(session.start(ownerTask("owner-running"))).resolves.toMatchObject({ status: "accepted" });
+    await expect(session.send(delegatedTask("delegated"))).resolves.toMatchObject({ status: "queued" });
+
+    denied.add("delegated");
+    await session.revalidateAuthorization?.();
+
+    await vi.waitFor(async () => {
+      const next = await events.next();
+      expect(next.value).toMatchObject({
+        type: "command_failed",
+        commandId: "delegated",
+        error: { code: "task_authority_revoked" },
+      });
+    });
+    expect(lane.interrupt).not.toHaveBeenCalled();
+
+    lane.emit({ kind: "turn_end", sessionId: "thread_1", turnOwner: "codex:test:1" });
+    await vi.waitFor(() => expect(session.snapshot().state).toBe("idle"));
+    expect(started).toEqual(["owner owner-running"]);
+    expect(session.snapshot().state).not.toBe("closed");
+  });
+
+  it("interrupts a running delegated turn once and still runs the next owner turn", async () => {
+    const denied = new Set<string>();
+    const { lane, active, session } = setup("cursor", denied);
+
+    await expect(session.start(delegatedTask("delegated"))).resolves.toMatchObject({ status: "accepted" });
+    expect(active).toHaveBeenLastCalledWith([expect.objectContaining({ id: "delegated" })]);
+
+    denied.add("delegated");
+    await session.revalidateAuthorization?.();
+    await session.revalidateAuthorization?.();
+
+    expect(lane.interrupt).toHaveBeenCalledOnce();
+    expect(lane.interrupt).toHaveBeenCalledWith({ requestId: expect.any(String), reason: "task_authority_revoked" });
+    expect(active).toHaveBeenLastCalledWith([]);
+
+    lane.emit({ kind: "turn_end", sessionId: "thread_1", turnOwner: "cursor:test:1" });
+    await vi.waitFor(() => expect(session.snapshot().state).toBe("idle"));
+    await expect(session.send(ownerTask("owner-next"))).resolves.toMatchObject({ status: "accepted" });
+  });
+});
+

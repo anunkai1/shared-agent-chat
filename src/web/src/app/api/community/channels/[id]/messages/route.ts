@@ -94,6 +94,7 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
     const authority = await loadTaskAuthority(db, {
       botUserId: ctx.actor.userId,
       botOwnerUserId: ctx.actor.ownerUserId,
+      onlyAuthorUserId: ctx.actor.taskAuthorUserId,
       authorIds: items.map((row) => row.authorId),
     })
     const messages = await queries.communityAgentInbox.toAgentMessages(
@@ -136,6 +137,7 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
     const authority = await loadTaskAuthority(db, {
       botUserId: ctx.actor.userId,
       botOwnerUserId: ctx.actor.ownerUserId,
+      onlyAuthorUserId: ctx.actor.taskAuthorUserId,
       authorIds: messages.flatMap((message) => [message.authorId, message.replyTo?.authorId]),
     })
     return writeCommunityMessagesRead(req, channelId, {

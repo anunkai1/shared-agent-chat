@@ -48,6 +48,7 @@ export type CommunityActor =
       /** Server-internal binding state resolved by runner auth. */
       isActive: boolean
       delegatedByUserId?: string
+      taskAuthorUserId?: string
     }
 
 interface CommunityActorContext {
@@ -134,6 +135,7 @@ function createCommunityActorHandler(
           ownerUserId: resolved.actor.ownerUserId,
           machineId: resolved.actor.machineId,
           isActive: resolved.actor.isActive,
+          ...(req.headers.has("X-Alook-Task-Author") ? { taskAuthorUserId: req.headers.get("X-Alook-Task-Author")! } : {}),
         },
         params: resolvedParams,
       }))

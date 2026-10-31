@@ -297,7 +297,7 @@ function bindFactorySession(
   return session;
 }
 
-function makeManager(opts: { logger?: Logger; tickIntervalMs?: number; idleTimeoutMs?: number; idleResetTimeoutMs?: number; staleThresholdMs?: number; resetStuckThresholdMs?: number; handshakeTimeoutMs?: number; now?: () => number; onBotAuditEvent?: (agentId: string, event: unknown, context: { sessionId: string | null; launchId: string | null }) => void } = {}) {
+function makeManager(opts: { logger?: Logger; tickIntervalMs?: number; authorizeMessage?: (agentId: string, message: { id?: string }) => Promise<boolean>; idleTimeoutMs?: number; idleResetTimeoutMs?: number; staleThresholdMs?: number; resetStuckThresholdMs?: number; handshakeTimeoutMs?: number; now?: () => number; onBotAuditEvent?: (agentId: string, event: unknown, context: { sessionId: string | null; launchId: string | null }) => void } = {}) {
   const session = fakeSession();
   const factory = sessionFactoryFor(session);
   const onRuntimeSpawnFailed = vi.fn();
@@ -6385,5 +6385,81 @@ describe("Codex root event ownership — subagent completion isolation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("AgentProcessManager — delegated authority cancellation", () => {
+  const grantSource = {
+    messageId: "delegated",
+    authorUserId: "guest",
+    channelId: "ch_1",
+    grantId: "grant_1",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+  const ownerSource = { messageId: "owner-root", authorUserId: "owner", channelId: "ch_1", grantId: null, expiresAt: null };
+
+  it("drops only the revoked queued delivery and leaves the owner's running turn alone", async () => {
+    const authorizeMessage = vi.fn(async (_agentId: string, message: { authorization?: { principal: string } }) =>
+      message.authorization?.principal === "owner");
+    const { mgr, session } = makeManager({ authorizeMessage });
+    const stop = vi.spyOn(session, "stop");
+
+    // The first delivery spawns; the second waits in the inbox behind it.
+    mgr.deliver("a1", { id: "owner-root", text: "owner work", authorization: { principal: "owner", data: ownerSource } });
+    mgr.deliver("a1", {
+      id: "delegated",
+      text: "delegated work",
+      authorization: { principal: "grant:grant_1", data: grantSource },
+    });
+    expect(mgr.snapshot().agents.a1.inbox.map((message) => message.id)).toEqual(["delegated"]);
+
+    await mgr.revalidateAuthorization("a1");
+    expect(mgr.snapshot().agents.a1.inbox).toEqual([]);
+    expect(authorizeMessage).toHaveBeenCalledWith("a1", expect.objectContaining({ id: "delegated" }));
+
+    session.startResolver?.();
+    await vi.waitFor(() => expect(mgr.snapshot().agents.a1.execution.lease.state).toBe("active"));
+    expect(stop).not.toHaveBeenCalled();
+    expect(mgr.snapshot().agents.a1.status).toBe("running");
+  });
+
+  it("settles a revoked delivery as cancelled instead of failing the owner's session", async () => {
+    const { mgr, session, onRuntimeSpawnFailed } = makeManager();
+    const stop = vi.spyOn(session, "stop");
+    vi.spyOn(session, "send").mockResolvedValue({
+      status: "rejected",
+      reason: "runtime_unavailable",
+      error: { category: "cancelled", code: "task_authority_revoked", message: "revoked", retryable: false },
+    } as never);
+
+    mgr.deliver("a1", { id: "owner-root", text: "owner work" });
+    session.startResolver?.();
+    await vi.waitFor(() => expect(mgr.snapshot().agents.a1.execution.lease.state).toBe("active"));
+    mgr.deliver("a1", { id: "delegated", text: "delegated work" });
+
+    await vi.waitFor(() => expect(session.send).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(stop).not.toHaveBeenCalled();
+    expect(onRuntimeSpawnFailed).not.toHaveBeenCalled();
+    expect(mgr.snapshot().agents.a1.status).toBe("running");
+  });
+
+  it("still stops the session when a delivery fails for an ordinary reason", async () => {
+    const { mgr, session } = makeManager();
+    const stop = vi.spyOn(session, "stop");
+    vi.spyOn(session, "send").mockResolvedValue({
+      status: "rejected",
+      reason: "runtime_unavailable",
+      error: { category: "process", code: "delivery_failed", message: "boom", retryable: true },
+    } as never);
+
+    mgr.deliver("a1", { id: "owner-root", text: "owner work" });
+    session.startResolver?.();
+    await vi.waitFor(() => expect(mgr.snapshot().agents.a1.execution.lease.state).toBe("active"));
+    mgr.deliver("a1", { id: "later", text: "later work" });
+
+    await vi.waitFor(() => expect(stop).toHaveBeenCalled());
   });
 });

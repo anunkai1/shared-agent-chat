@@ -18,5 +18,7 @@ export const GET = withCommunityDaemonAuth(async (req, ctx) => {
   const includeInactive = req.nextUrl.searchParams.get("includeInactive") === "true"
   const db = includeInactive ? getPrimaryDb(ctx.env.DB) : getDb(ctx.env.DB)
   const bots = await queries.communityBot.listBotsForMachine(db, ctx.machineId, { includeInactive })
+  // Each bot carries its REAL owner: provenance labelling on the runner must not
+  // assume every bot on a machine belongs to the user who paired it.
   return NextResponse.json({ bots })
 })

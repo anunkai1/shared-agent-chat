@@ -23,6 +23,7 @@
  *     — the `driverFor` is INJECTED by the caller.
  */
 import { homedir } from "os";
+import { TaskAuthorityClient, type TaskAuthorityService } from "./taskAuthority.js";
 import { PiiStore } from "../pii/store.js";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { createRotatingFileSink, type RotatingFileSink } from "../util/rotatingFileSink.js";
@@ -257,6 +258,7 @@ export type DaemonWebSocketFactory = (url: string, headers: Record<string, strin
 export interface CreateDaemonOptions {
   /** Long-lived credential (`cmk_...`) minted by /activate. */
   machineKey: string;
+  taskAuthority?: TaskAuthorityService;
   /** Server HTTP base, e.g. http://127.0.0.1:4517 (enroll + data plane upstream). */
   serverUrl: string;
   /** Server control-plane ws base, e.g. ws://127.0.0.1:4518. */
@@ -378,6 +380,7 @@ export function createBuiltinDaemonSessionFactory(
     });
     const opened = await sdk.open({
       backend: selected.backend,
+      executionPolicy: ctx.executionPolicy,
       launch: {
         workingDirectory: ctx.workingDirectory,
         instructions: { format: "markdown", content: ctx.standingPrompt },
@@ -398,6 +401,7 @@ export function createBuiltinDaemonSessionFactory(
  */
 export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDaemon> {
   const log = opts.logger ?? createLogger({ header: "@alook/daemon" });
+  const taskAuthority = opts.taskAuthority ?? new TaskAuthorityClient({ serverUrl: opts.serverUrl, machineKey: opts.machineKey });
   const recentContextSdk = createBuiltinAgentDriverSdk();
   const appendRecentContext = createRecentContextPromptAppender(
     (input) => recentContextSdk.discoverRecentContext(input as never),
@@ -558,6 +562,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
 
   const broker = new CredentialBroker({ upstreamBaseUrl: opts.serverUrl });
   const proxy = await startCredentialProxy(broker, {
+    authorizeRequest: agentId => taskAuthority.proxyHeaders(agentId),
     pii: {
       filterWithResult: (botId, text) => localPiiStore.filterWithResult(botId, text),
       local: (botId, input) => localPiiStore.local(botId, input),
@@ -701,6 +706,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
       description?: string;
       ownerName?: string;
       ownerDiscriminator?: string;
+      ownerUserId?: string;
     }>
   > {
     const res = await fetch(`${opts.serverUrl}/api/community/daemon/bots${includeInactive ? "?includeInactive=true" : ""}`, {
@@ -716,6 +722,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
         description?: string;
         ownerName?: string;
         ownerDiscriminator?: string;
+        ownerUserId?: string;
       }>;
     };
     return json.bots ?? [];
@@ -724,6 +731,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
   function replaceBotCache(bots: Awaited<ReturnType<typeof listMyBotsHttp>>): void {
     botsById.clear();
     for (const b of bots) {
+      if (b.ownerUserId) taskAuthority.setOwner(b.id, b.ownerUserId);
       botsById.set(b.id, {
         name: b.name,
         discriminator: b.discriminator,
@@ -972,6 +980,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
   })();
 
   const manager = new AgentProcessManager({
+    authorizeMessage: (agentId, message) => taskAuthority.authorizeMessage(agentId, message),
     // Wrap the caller's driverFor to short-circuit dispatch to a known-unhealthy
     // runtime. If the router flags the runtime as unhealthy we throw
     // UnknownRuntimeError with the healthy-only id list — the existing catch
@@ -1000,6 +1009,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
       const botMeta = botsById.get(agentId);
       return {
         agentId,
+        executionPolicy: taskAuthority.policyFor(agentId),
         workingDirectory: workdirFor(agentId),
         credentialProxy: { broker, proxyUrl: proxy.url, runnerKey, capabilities: opts.capabilities },
         agentCliPath: resolvedCliPath ?? opts.agentCliPath,
@@ -1151,6 +1161,11 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
     appendRecentContext,
     // onBeforeAgent gate — reject unknown bots BEFORE enroll to keep the
     // failure code stable (`bot_unknown` vs `bot_enroll_failed`).
+    authorizeWake: command => taskAuthority.prepareWake(command.agentId, command.taskSource),
+    onAuthorityChanged: async agentId => {
+      taskAuthority.invalidate(agentId);
+      await manager.revalidateAuthorization(agentId);
+    },
     onBeforeAgent: async (agentId) => {
       if (!botsById.has(agentId)) {
         // Try one deferred warmup pass — the ceiling-exhaustion case parks

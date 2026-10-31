@@ -377,3 +377,40 @@ export async function pushAgentProviderSwitchToMachine(
     return { sent: 0, deliveryError: true }
   }
 }
+
+/**
+ * Push `agent:authority_changed` to the machine that hosts this bot.
+ *
+ * The runner revalidates the task source of everything it has queued or
+ * running for the agent: denied queued work is dropped and a running delegated
+ * turn is interrupted at the driver's next safe boundary. Owner turns are not
+ * interrupted and are never requeued as a result.
+ *
+ * `sent === 0` means the daemon is not connected right now; the revoke itself
+ * already landed in D1, so a reconnect or the runner's own periodic
+ * revalidation still converges. This is a nudge, not the authority check.
+ */
+export async function pushAgentAuthorityChangedToMachine(
+  env: Env,
+  machineId: string,
+  agentId: string,
+): Promise<{ sent: number }> {
+  const path = `/community-machine/by-id/${encodeURIComponent(machineId)}/push-agent-authority-changed`
+  try {
+    const res = await wsDoFetch(
+      env,
+      path,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agentId }) },
+      { label: machineId, type: "agent:authority_changed" },
+    )
+    if (!res.ok) {
+      log.warn("agent:authority_changed push non-ok", { machineId, status: res.status })
+      return { sent: 0 }
+    }
+    const data = (await res.json()) as { sent?: number }
+    return { sent: data.sent ?? 0 }
+  } catch (err) {
+    log.warn("agent:authority_changed push threw", { machineId, err: String(err) })
+    return { sent: 0 }
+  }
+}

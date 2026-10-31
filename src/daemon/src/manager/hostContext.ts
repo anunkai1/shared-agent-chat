@@ -33,6 +33,7 @@ export interface HostLaunchConfig {
 }
 
 export interface HostLaunchContext {
+  executionPolicy?: import("@alook/agent-driver").AgentExecutionPolicy;
   agentId: string;
   launchId?: string;
   workingDirectory: string;

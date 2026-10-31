@@ -2,6 +2,7 @@ import type {
   AgentDriverError,
   AgentEvent,
   AgentMessage,
+  AgentExecutionPolicy,
   AgentSession,
   AgentSessionResult,
   AgentSessionSnapshot,
@@ -169,6 +170,10 @@ function driverError(
   return { category, code, message: scrubDriverErrorMessage(message), retryable };
 }
 
+class AuthorizationDenied extends Error {
+  readonly failure = driverError("cancelled", "task_authority_revoked", "Task authority is no longer valid");
+}
+
 class StructuredLaneAdmissionError extends Error {
   constructor(
     readonly code: "reset_required" | "incompatible_configuration" | "authentication_required" | "runtime_busy",
@@ -199,6 +204,11 @@ implements AgentSession<Specs, Id> {
   private lane: RuntimeLane | null = null;
   private activeTurn?: ActiveTurn;
   private readonly queued: QueuedCommand[] = [];
+  private readonly policyMessages = new Map<string, AgentMessage>();
+  private readonly deniedCommands = new Set<string>();
+  private authorizationTimer?: ReturnType<typeof setInterval>;
+  private authorizationSweep?: Promise<void>;
+  private authorityInterruptTurnId?: string;
   private readonly commands = new Map<string, CommandRecord>();
   private readonly commandAdmittedAt = new Map<string, number>();
   private startedAdmitted = false;
@@ -263,6 +273,7 @@ implements AgentSession<Specs, Id> {
     private readonly host: AgentDriverHost,
     private readonly prepared: PreparedExecutionResource,
     private readonly hostReleaseTimeoutMs: number,
+    private readonly executionPolicy?: AgentExecutionPolicy,
   ) {
     this.capabilities = capabilities;
     this.behavior = this.capabilities as import("../contract.js").BackendCapabilities;
@@ -286,6 +297,10 @@ implements AgentSession<Specs, Id> {
       () => { void this.failBufferOverflow(); },
     );
     this.events = this.eventQueue.stream;
+    if (executionPolicy) {
+      this.authorizationTimer = setInterval(() => { void this.revalidateAuthorization(); }, Math.max(20, executionPolicy.checkIntervalMs ?? 1000));
+      this.authorizationTimer.unref();
+    }
   }
 
   start(message: AgentMessage): Promise<DeliveryReceipt> {
@@ -294,6 +309,75 @@ implements AgentSession<Specs, Id> {
 
   send(message: AgentMessage): Promise<DeliveryReceipt> {
     return this.admit("send", message);
+  }
+
+  private activePolicyMessages(): AgentMessage[] {
+    return (this.activeTurn?.commandIds ?? []).flatMap(id => {
+      const message = this.policyMessages.get(id);
+      return message ? [message] : [];
+    });
+  }
+
+  private static principalOf(message: AgentMessage): string {
+    return message.authorization?.principal ?? "owner";
+  }
+
+  private samePrincipal(message: AgentMessage, extra: readonly AgentMessage[] = []): boolean {
+    if (!this.executionPolicy) return true;
+    const principal = LogicalAgentSession.principalOf(message);
+    return this.activePolicyMessages().every(active => LogicalAgentSession.principalOf(active) === principal)
+      && extra.every(other => LogicalAgentSession.principalOf(other) === principal);
+  }
+
+  private publishActivePolicy(): void {
+    if (!this.executionPolicy) return;
+    const messages = this.activePolicyMessages();
+    this.executionPolicy.onActiveMessages?.(messages.some(message => this.deniedCommands.has(message.id)) ? [] : messages);
+  }
+
+  private async isAuthorized(message: AgentMessage): Promise<boolean> {
+    if (this.deniedCommands.has(message.id)) return false;
+    try {
+      const allowed = await this.executionPolicy!.authorize(message);
+      if (!allowed) this.deniedCommands.add(message.id);
+      return allowed && !this.deniedCommands.has(message.id);
+    } catch {
+      this.deniedCommands.add(message.id);
+      return false;
+    }
+  }
+
+  private async assertAuthorized(messages: readonly AgentMessage[]): Promise<void> {
+    if ((await Promise.all(messages.map(message => this.isAuthorized(message)))).some(allowed => !allowed)) {
+      throw new AuthorizationDenied();
+    }
+  }
+
+  revalidateAuthorization(): Promise<void> {
+    if (!this.executionPolicy || this.finishing || this.state === "closed" || this.state === "stopping") return Promise.resolve();
+    if (this.authorizationSweep) return this.authorizationSweep;
+    this.authorizationSweep = (async () => {
+      const active = this.activeTurn;
+      const candidates = new Map(this.queued.map(item => [item.message.id, item.message]));
+      for (const message of this.activePolicyMessages()) candidates.set(message.id, message);
+      for (const delivery of this.steeringDeliveries) candidates.set(delivery.message.id, delivery.message);
+      if (this.safeBoundaryDelivery) candidates.set(this.safeBoundaryDelivery.item.message.id, this.safeBoundaryDelivery.item.message);
+      for (const id of this.policyMessages.keys()) if (!candidates.has(id)) this.policyMessages.delete(id);
+      if (candidates.size === 0) return;
+      await Promise.all([...candidates.values()].map(message => this.isAuthorized(message)));
+      for (let index = this.queued.length - 1; index >= 0; index--) {
+        const item = this.queued[index]!;
+        if (!this.deniedCommands.has(item.message.id)) continue;
+        this.queued.splice(index, 1);
+        this.emit({ type: "command_failed", commandId: item.message.id, error: new AuthorizationDenied().failure });
+      }
+      this.publishActivePolicy();
+      if (active && this.activeTurn === active && active.commandIds.some(id => this.deniedCommands.has(id)) && this.authorityInterruptTurnId !== active.turnId) {
+        const result = await this.interrupt({ requestId: this.host.createId(), reason: "task_authority_revoked" });
+        if (result.status === "accepted") this.authorityInterruptTurnId = active.turnId;
+      }
+    })().finally(() => { this.authorizationSweep = undefined; });
+    return this.authorizationSweep;
   }
 
   updateSettings(input: RuntimeSettingsUpdate): Promise<RuntimeSettingsUpdateResult> {
@@ -470,6 +554,7 @@ implements AgentSession<Specs, Id> {
     message: AgentMessage,
   ): Promise<DeliveryReceipt> {
     if (!message.id || !message.text) return { status: "rejected", reason: "invalid_input" };
+    if (this.executionPolicy) this.policyMessages.set(message.id, message);
     if (this.state === "closed" || this.state === "stopping" || this.finishing) {
       return { status: "rejected", reason: "closed" };
     }
@@ -488,13 +573,20 @@ implements AgentSession<Specs, Id> {
     if (!this.startedAdmitted) return { status: "rejected", reason: "not_started" };
     if (this.state === "awaiting_first_message") {
       if (message.kind === "system") return this.queue(message, "waiting_for_message");
-      const prefix = this.queued.splice(0).map((item) => {
+      // Only coalesce queued work that belongs to the SAME principal. A turn is
+      // one authority context; merging an owner message with someone else's
+      // delegated notice would run the delegated text under the owner's
+      // authority (and vice versa) with no way to revoke just one half.
+      const prefix: AgentMessage[] = [];
+      while (this.queued.length > 0 && this.samePrincipal(this.queued[0]!.message, [...prefix, message])) {
+        const item = this.queued.shift()!;
         this.recordQueueDwell(item);
-        return item.message;
-      });
+        prefix.push(item.message);
+      }
       return this.startTurn([...prefix, message], "prompt");
     }
     if (this.state === "working" || this.state === "starting") {
+      if (!this.samePrincipal(message)) return this.queue(message, "runtime_busy");
       if (this.behavior.midTurnDelivery === "steer" && this.activeTurn && this.lane) {
         return this.deliverSteer(message, this.activeTurn);
       }
@@ -573,6 +665,8 @@ implements AgentSession<Specs, Id> {
     };
     const admit = async (reuseExistingLane: boolean): Promise<DeliveryReceipt> => {
       try {
+        if (this.executionPolicy) await this.assertAuthorized(messages);
+        this.publishActivePolicy();
         let laneAdmission: LaneAdmission;
         if (reuseExistingLane) {
           laneAdmission = await this.sendLane(text, "idle");
@@ -595,6 +689,18 @@ implements AgentSession<Specs, Id> {
       } catch (error) {
         if (!this.isStartCurrent(generation, turnId) || admission.finalized) {
           return admission.accepted ? acceptedReceipt : { status: "rejected", reason: "closed" };
+        }
+        if (error instanceof AuthorizationDenied) {
+          this.failTurnAdmissionWithError(error.failure);
+          this.activeTurn = undefined;
+          this.publishActivePolicy();
+          this.state = "idle";
+          if (this.turnCount === 0) {
+            await this.stopWithRelease({ reason: "shutdown", forceAfterMs: 2000 }, "requested_stop");
+          } else {
+            void this.startNextQueued();
+          }
+          return { status: "rejected", reason: "runtime_unavailable", error: error.failure };
         }
         const failure = error instanceof StructuredLaneAdmissionError
           ? driverError(
@@ -677,6 +783,8 @@ implements AgentSession<Specs, Id> {
       if (this.lane === lane) this.lane = null;
       return null;
     }
+    if (this.executionPolicy) await this.assertAuthorized(this.activePolicyMessages());
+    this.publishActivePolicy();
     const admission = await lane.start({
       text: prompt,
       sessionId: ctx.config.sessionId,
@@ -951,6 +1059,7 @@ implements AgentSession<Specs, Id> {
     // every event from a closed per-turn transport before any shared-state side
     // effect in onAdapterEvent's switch can run.
     if (this.adapter.execution.lifetime === "turn") return undefined;
+    if (this.closedLaneTombstone?.commandIds.some(id => this.deniedCommands.has(id))) return undefined;
     const isRootWork = event.kind === "tool_call"
       || event.kind === "tool_output"
       || event.kind === "compaction_started"
@@ -1032,6 +1141,7 @@ implements AgentSession<Specs, Id> {
       };
     }
     this.activeTurn = undefined;
+    this.publishActivePolicy();
     this.turnError = undefined;
     this.interruptedTurnId = undefined;
     this.clearOutstandingToolUses();
@@ -1069,7 +1179,8 @@ implements AgentSession<Specs, Id> {
       && !this.reviewing
       && this.activeTurn !== undefined
       && this.lane !== null
-      && this.queued.length > 0;
+      && this.queued.length > 0
+      && this.samePrincipal(this.queued[0]!.message);
   }
 
   private async drainSafeBoundaryQueue(): Promise<void> {
@@ -1079,6 +1190,7 @@ implements AgentSession<Specs, Id> {
       const delivery: SafeBoundaryDelivery = { item, activeTurn, finalized: false };
       this.safeBoundaryDelivery = delivery;
       try {
+        if (this.executionPolicy) await this.assertAuthorized([item.message]);
         await this.sendLane(item.message.text, "busy");
       } catch (error) {
         if (error instanceof StructuredLaneAdmissionError && error.code === "runtime_busy") {
@@ -1093,7 +1205,7 @@ implements AgentSession<Specs, Id> {
             type: "command_failed",
             commandId: item.message.id,
             turnId: activeTurn.turnId,
-            error: driverError("process", "delivery_failed", String(error), true),
+            error: error instanceof AuthorizationDenied ? error.failure : driverError("process", "delivery_failed", String(error), true),
           });
         }
         continue;
@@ -1104,6 +1216,7 @@ implements AgentSession<Specs, Id> {
       this.recordQueueDwell(item);
       delivery.finalized = true;
       activeTurn.commandIds.push(item.message.id);
+      this.publishActivePolicy();
       this.emit({
         type: "command_accepted",
         commandId: item.message.id,
@@ -1372,6 +1485,7 @@ implements AgentSession<Specs, Id> {
             "Turn closed before command acceptance",
           );
         }
+        if (this.executionPolicy) await this.assertAuthorized([message]);
         await this.sendLane(message.text, "busy");
         if (delivery.finalized || this.activeTurn !== activeTurn) {
           throw delivery.failure ?? driverError(
@@ -1382,10 +1496,11 @@ implements AgentSession<Specs, Id> {
         }
         delivery.finalized = true;
         activeTurn.commandIds.push(message.id);
+        this.publishActivePolicy();
         this.emit({ type: "command_accepted", commandId: message.id, turnId: activeTurn.turnId, delivery: "steer" });
         return { status: "accepted", delivery: "steer", commandId: message.id, turnId: activeTurn.turnId };
       } catch (error) {
-        const failure = delivery.failure ?? (typeof error === "object" && error !== null && "category" in error
+        const failure = delivery.failure ?? (error instanceof AuthorizationDenied ? error.failure : typeof error === "object" && error !== null && "category" in error
           ? error as AgentDriverError
           : driverError("process", "delivery_failed", String(error), true));
         if (!delivery.finalized) {
@@ -1398,7 +1513,7 @@ implements AgentSession<Specs, Id> {
     try {
       return await Promise.race([physical, cancellation]);
     } catch (error) {
-      const failure = delivery.failure ?? (typeof error === "object" && error !== null && "category" in error
+      const failure = delivery.failure ?? (error instanceof AuthorizationDenied ? error.failure : typeof error === "object" && error !== null && "category" in error
         ? error as AgentDriverError
         : driverError("process", "delivery_failed", String(error), true));
       if (!delivery.finalized) {
@@ -1526,6 +1641,8 @@ implements AgentSession<Specs, Id> {
         this.terminalResult = result;
         this.state = "closed";
         this.emit({ type: "session_closed", result });
+        if (this.authorizationTimer) clearInterval(this.authorizationTimer);
+        this.executionPolicy?.onActiveMessages?.([]);
         this.eventQueue.close();
         this.resolveClosed(result);
         this.finishing = false;
