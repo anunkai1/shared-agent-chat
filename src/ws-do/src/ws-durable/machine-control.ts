@@ -144,6 +144,20 @@ export async function handleMachineControlFetch(
     })
   }
 
+  if (url.pathname === "/push-agent-authority-changed" && request.method === "POST") {
+    let payload: unknown
+    try { payload = await request.json() } catch { return Response.json({ sent: 0 }, { status: 400 }) }
+    const raw = payload && typeof payload === "object" ? payload as Record<string, unknown> : null
+    if (!raw || Object.keys(raw).length !== 1 || typeof raw.agentId !== "string" || raw.agentId.length === 0) {
+      return Response.json({ sent: 0 }, { status: 400 })
+    }
+    const sent = forwardToCommunityMachine(context, JSON.stringify({
+      type: "agent:authority_changed",
+      agentId: raw.agentId,
+    })).sent
+    return Response.json({ sent }, { headers: { "Content-Type": "application/json" } })
+  }
+
   if (url.pathname === "/forward-agent-wake" && request.method === "POST") {
     const body = await request.text()
     const attempted = forwardToCommunityMachine(context, body).sent

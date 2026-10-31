@@ -396,6 +396,47 @@ describe("WebSocketDurableObject", () => {
         expect(getWebSockets).not.toHaveBeenCalled()
       })
 
+      it("forwards an authority-change nudge carrying only the agent id", async () => {
+        const { durable, getWebSockets, storage } = createDO()
+        const ws = createMockWebSocket()
+        ws.serializeAttachment({
+          type: "community-machine",
+          machineId: "cm_1",
+          userId: "u_1",
+          authenticated: true,
+        })
+        getWebSockets.mockReturnValue([ws])
+
+        const response = await durable.fetch(new Request("http://internal/push-agent-authority-changed", {
+          method: "POST",
+          body: JSON.stringify({ agentId: "a_1" }),
+        }))
+
+        expect(response.status).toBe(200)
+        await expect(response.json()).resolves.toEqual({ sent: 1 })
+        expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
+          type: "agent:authority_changed",
+          agentId: "a_1",
+        }))
+        expect(storage.put).not.toHaveBeenCalled()
+      })
+
+      it.each([
+        ["an extra field", { agentId: "a_1", reason: "revoked" }],
+        ["no agent", {}],
+        ["an empty agent", { agentId: "" }],
+        ["a non-string agent", { agentId: 42 }],
+      ])("rejects an authority-change body with %s before touching sockets", async (_label, body) => {
+        const { durable, getWebSockets } = createDO()
+        const response = await durable.fetch(new Request("http://internal/push-agent-authority-changed", {
+          method: "POST",
+          body: JSON.stringify(body),
+        }))
+
+        expect(response.status).toBe(400)
+        expect(getWebSockets).not.toHaveBeenCalled()
+      })
+
       it("rejects malformed runtime config update JSON before touching sockets", async () => {
         const { durable, getWebSockets } = createDO()
         const response = await durable.fetch(new Request("http://internal/push-runtime-config-update", {

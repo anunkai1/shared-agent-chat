@@ -6,8 +6,9 @@ Status date: 31/10/2026. **Useful foundation; not ready for a real-agent pilot.*
 
 The isolated evaluation supports continuing with Alook. M2 permissions are **incomplete**, not
 “server side complete”. A scoped review found bypasses in single-message reads, attachments and quoted
-content, plus grant/reconnect defects and missing runner revocation controls. Server hardening is now
-covered by targeted regressions, but a fresh-image live verification of these changes remains outstanding.
+content, plus grant/reconnect defects and missing runner revocation controls. Server hardening and the
+first runner-side authority enforcement are now covered by targeted regressions, but a fresh-image live
+verification of these changes remains outstanding — including any real runtime being interrupted.
 M3 pilot/deployment has not started.
 
 The review covered fork changes and relevant callers, not all inherited code, host security, every
@@ -59,6 +60,28 @@ New tests include real SQLite queries, real route/projector combinations with sy
 fixtures, pure-policy tests and request/handler tests. None is a live deployment or real-model rerun.
 See the change's verification record for exact revision/tree/lockfile identity, commands and outcomes.
 
+## Runner authority in this change
+
+- `agent:wake` carries the initiating message, author, channel and either the owner or the exact grant.
+  The daemon refuses a wake with no provenance, or one the server will not confirm, before creating a
+  session.
+- A daemon-authenticated route rechecks the source against the real message, the bot's machine/owner
+  binding, its readability of the channel and (for delegated work) the same live grant id. Answers are
+  short leases; only positive decisions are cached, only for about a second, and any authority-change
+  nudge drops them.
+- The driver authorises at root admission, again before the physical lane starts, and at every
+  safe-boundary/steering delivery, with a periodic sweep over queued, steering and running work.
+- Revoked queued work fails with `task_authority_revoked`; a running delegated turn is interrupted once.
+  Owner work is not dropped, interrupted or requeued, and delegated text is never merged or steered into
+  an owner turn.
+- Revocation nudges the owning machine (`agent:authority_changed`). A disconnected runner converges on
+  reconnect or its own revalidation, not instantly; interruption is best effort at a boundary and does
+  not undo completed effects.
+
+Coverage is unit and fixture level: real SQLite/route handler tests, injected-fetch client tests, and
+fake-lane driver/manager tests that drive the real admission, queue and interrupt code paths. No live
+server, model or runtime was interrupted end to end.
+
 ## Verification limits
 
 The earlier package run covered shared, web-node, agent-driver and daemon **unit** tests; daemon packed
@@ -71,10 +94,10 @@ such, not silently substituted for the failed run.
 
 ## Remaining gates
 
-1. **Runner authority and revocation:** preserve author/grant/expiry provenance through admission;
-   revalidate queued delegated work; selectively remove it and attempt running interruption on revoke
-   or expiry, preserving owner work. The current server row update does none of this. Already delivered
-   bytes and completed side effects cannot be recalled.
+1. **Runner authority evidence:** the logic exists and is unit/fixture tested, but no live runtime has
+   been revoked mid-turn. End-to-end interruption, reconnect convergence after a missed nudge, and the
+   idle-session ambient-authority surface all still need real evidence. Already delivered bytes and
+   completed side effects cannot be recalled.
 2. Honest-server runner enforcement is separate from malicious-server resistance. Signatures are not
    inherently necessary for the former; no independent trust-root guarantee exists for the latter.
 3. Grant-management UI, safer runtime launch defaults and independently restricted runners. Claude/Codex

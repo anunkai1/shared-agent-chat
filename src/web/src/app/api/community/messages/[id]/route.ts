@@ -54,7 +54,7 @@ export const GET = withCommunityActor(async (req: NextRequest, ctx) => {
   const db = ctx.actor.kind === "bot" ? getPrimaryDb(ctx.env.DB) : getDb(ctx.env.DB)
 
   if (ctx.actor.kind === "bot") {
-    return handleBotResolve(db, ctx.actor.userId, ctx.actor.ownerUserId, req)
+    return handleBotResolve(db, ctx.actor.userId, ctx.actor.ownerUserId, req, ctx.actor.taskAuthorUserId)
   }
   return handleHumanGet(db, ctx.actor.userId, ctx.params?.id, COMMUNITY_RESOURCE_CONTRACT_VERSION)
 })
@@ -195,6 +195,7 @@ async function handleBotResolve(
   botUserId: string,
   botOwnerUserId: string,
   req: NextRequest,
+  onlyAuthorUserId?: string,
 ) {
   const params = req.nextUrl.searchParams
   const ref = params.get("ref")
@@ -238,7 +239,7 @@ async function handleBotResolve(
     size: a.size,
   }))
 
-  const authority = await loadTaskAuthority(db, { botUserId, botOwnerUserId, authorIds: [row.authorId] })
+  const authority = await loadTaskAuthority(db, { botUserId, botOwnerUserId, authorIds: [row.authorId], onlyAuthorUserId })
   const message = await queries.communityAgentInbox.toAgentMessage(db, row, botUserId, attachments, authority)
   return writeJSON({ message })
 }

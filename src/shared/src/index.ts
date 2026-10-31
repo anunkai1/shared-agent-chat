@@ -563,6 +563,8 @@ export type {
 } from "./community-message-delivery";
 export type { DispatchOneWakeResult } from "./community/wake-dispatch";
 export { hasTaskAuthority, createTaskAuthority, NO_TASK_AUTHORITY_TEXT, type TaskGrant, type TaskAuthorityCheck } from "./community/task-authority";
+export { checkTaskSource } from "./community/task-source.server";
+export { TASK_AUTHOR_HEADER, TaskSourceSchema, TaskSourceCheckRequestSchema, TaskSourceDecisionSchema, taskSourceForMessage, type TaskSource } from "./community/task-source";
 export { loadTaskAuthorityForBot as loadTaskAuthority } from "./community/task-authority-load.server";
 export { MAX_TASK_GRANT_MINUTES, TaskGrantRequestSchema } from "./community/task-grant-request";
 export type { WakePayload, BuildUnreadWakeResult } from "./community/wake-dispatch";

@@ -3,9 +3,11 @@ import { NextRequest } from "next/server"
 
 const f = vi.hoisted(() => ({
   db: { primary: true }, owner: vi.fn(), candidate: vi.fn(), channel: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(),
+  push: vi.fn(),
 }))
 vi.mock("@/lib/db", () => ({ getPrimaryDb: () => f.db }))
 vi.mock("@/lib/middleware/auth", () => ({ withAuth: (handler: unknown) => handler }))
+vi.mock("@/lib/broadcast", () => ({ wsDoFetch: f.push }))
 vi.mock("@alook/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@alook/shared")>()
   return { ...actual, queries: {
@@ -29,6 +31,7 @@ describe("owner-only grant API", () => {
     f.channel.mockResolvedValue({ id: "channel" })
     f.create.mockImplementation(async (_db, input) => ({ id: "grant", ...input }))
     f.revoke.mockResolvedValue(true)
+    f.push.mockResolvedValue(Response.json({ sent: 1 }))
     f.list.mockResolvedValue([])
   })
   it.each([null, [], "string", { granteeUserId: "friend", channelId: 123 }, { granteeUserId: "friend", channelId: "" }, { granteeUserId: "friend", minutes: 0 }, { granteeUserId: "friend", minutes: 1441 }])("rejects malformed requests without creating a grant: %j", async body => {
@@ -81,5 +84,48 @@ describe("owner-only grant API", () => {
     expect(f.list).not.toHaveBeenCalled()
     expect(f.create).not.toHaveBeenCalled()
     expect(f.revoke).not.toHaveBeenCalled()
+  })
+
+  it("nudges the owning runner so it drops queued work and interrupts a revoked turn", async () => {
+    f.owner.mockResolvedValue({ id: "bot", machineId: "machine" })
+
+    const response = await DELETE(req(), ctx)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ revoked: true, grantId: "grant", runnerNotified: true })
+    expect(f.push).toHaveBeenCalledWith(
+      ctx.env,
+      "/community-machine/by-id/machine/push-agent-authority-changed",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ agentId: "bot" }) }),
+      { label: "machine", type: "agent:authority_changed" },
+    )
+  })
+
+  it("still revokes when the runner is offline, reporting the nudge honestly", async () => {
+    f.owner.mockResolvedValue({ id: "bot", machineId: "machine" })
+    f.push.mockResolvedValue(Response.json({ sent: 0 }))
+
+    const response = await DELETE(req(), ctx)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ revoked: true, grantId: "grant", runnerNotified: false })
+  })
+
+  it("survives a nudge that throws, because the D1 revoke is the authority", async () => {
+    f.owner.mockResolvedValue({ id: "bot", machineId: "machine" })
+    f.push.mockRejectedValue(new Error("do unavailable"))
+
+    const response = await DELETE(req(), ctx)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ revoked: true, grantId: "grant", runnerNotified: false })
+  })
+
+  it("does not attempt a nudge for a bot with no machine", async () => {
+    f.owner.mockResolvedValue({ id: "bot", machineId: null })
+
+    await DELETE(req(), ctx)
+
+    expect(f.push).not.toHaveBeenCalled()
   })
 })

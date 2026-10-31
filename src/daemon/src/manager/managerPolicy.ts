@@ -7,6 +7,7 @@ export interface AgentMsg {
   seq?: number;
   text: string;
   readonly preparedInput?: AgentMessage;
+  readonly authorization?: AgentMessage["authorization"];
 }
 
 export interface TurnIdentity {
@@ -120,6 +121,7 @@ export type ManagerEvent =
   | { type: "wake"; agentId: string; message: AgentMsg; nowMs: number }
   | { type: "spawned"; agentId: string; nowMs: number }
   | { type: "queue_delivery"; agentId: string; messages: readonly AgentMsg[] }
+  | { type: "cancel_deliveries"; agentId: string; commandIds: readonly string[] }
   | { type: "backend_session"; agentId: string; sessionId: string; stalledBefore?: boolean }
   | {
       type: "attach_session";
@@ -143,7 +145,7 @@ export type ManagerEvent =
       agentId: string;
       sessionInstanceId: string;
       commandId: string;
-      outcome: "accepted" | "failed";
+      outcome: "accepted" | "failed" | "cancelled";
     }
   | {
       type: "admission_acknowledged";
@@ -276,6 +278,11 @@ export function reduceManager(state: ManagerState, event: ManagerEvent): ReduceR
       const messages = drainInbox(agent);
       return commit(state, agent, messages.map((message) => ({ type: "send", agentId: event.agentId, message, mode })));
     }
+
+    case "cancel_deliveries":
+      return mutate(state, event.agentId, agent => {
+        agent.inbox = agent.inbox.filter(message => !message.id || !event.commandIds.includes(message.id));
+      });
 
     case "queue_delivery":
       return mutate(state, event.agentId, (a) => {

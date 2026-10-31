@@ -9,7 +9,7 @@ export type {
   AntigravityConfig, AntigravityCapabilities, AgyConfig, AgyCapabilities, ClaudeProvider, PiProvider, BaseBackendConfig, ClaudeConfig, CodexConfig, ModelBackendConfig, CursorConfig,
   GrokConfig, OpenCodeConfig, PiConfig, BackendCapabilities, ClaudeCapabilities, CodexCapabilities, CursorCapabilities,
   GrokCapabilities, OpenCodeCapabilities, PiCapabilities, BackendExtensionSpec, BackendTypeSpec, BuiltinBackendSpecs, BackendId,
-  FixedCapabilities, ConfigOf, CapabilitiesOf, ExtensionsOf, ExtraEventOf, AgentInstructions, AgentLaunchContext, AgentMessage,
+  FixedCapabilities, ConfigOf, CapabilitiesOf, ExtensionsOf, ExtraEventOf, AgentInstructions, AgentLaunchContext, AgentMessage, AgentExecutionPolicy,
   AgentDriverError, OpenSessionResult, DeliveryReceipt, InterruptResult, StopInput, StopReceipt, HostCleanupResult,
   AgentSessionResult, AgentTurnResult, TokenMetricDelta, TokenUsageDelta, TokenUsageIdentity, QuotaErrorCode,
   QuotaProductIdentity, QuotaModelIdentity, QuotaWindowIdentity, QuotaLimit,

@@ -306,6 +306,7 @@ export const DEFAULT_CAPABILITY_RESOLVER: CapabilityResolver = (method, pathname
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 20_000;
 
 export interface CredentialProxyOptions {
+  authorizeRequest?: (agentId: string) => Promise<Record<string, string>>;
   pii?: PiiProxy;
   /** Bind host (default loopback). Keep it loopback in production. */
   host?: string;
@@ -550,6 +551,21 @@ export async function startCredentialProxy(
   const server = http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? "/", "http://placeholder");
     const pathname = requestUrl.pathname;
+    let authorityHeaders: Record<string, string> = {};
+    if (options.authorizeRequest) {
+      const identity = broker.check(req.headers.authorization);
+      if (!identity.ok) {
+        writeJson(res, identity.status, { error: identity.error, code: identity.code });
+        req.resume();
+        return;
+      }
+      try { authorityHeaders = await options.authorizeRequest(identity.reg.agentId); }
+      catch {
+        writeJson(res, 403, { error: "no authorised active task", code: "task_authority_revoked" });
+        req.resume();
+        return;
+      }
+    }
     if (pathname === LOCAL_PII_PATH && (req.method === "GET" || req.method === "POST")) {
       const localVerdict = broker.check(req.headers["authorization"], req.method === "GET" ? "read" : "send");
       if (!localVerdict.ok) { writeJson(res, localVerdict.status, { error: localVerdict.error, code: localVerdict.code }); req.resume(); return; }
@@ -688,6 +704,7 @@ export async function startCredentialProxy(
     outHeaders[broker.headerNames.agentId.toLowerCase()] = reg.agentId;
     outHeaders[broker.headerNames.client.toLowerCase()] = broker.clientLabel;
     outHeaders[broker.headerNames.capabilities.toLowerCase()] = [...reg.capabilities].join(",");
+    for (const [name, value] of Object.entries(authorityHeaders)) outHeaders[name.toLowerCase()] = value;
     if (isInboxPull || isInboxAck) outHeaders["accept-encoding"] = "identity";
     if (filteredBody) {
       delete outHeaders["transfer-encoding"];

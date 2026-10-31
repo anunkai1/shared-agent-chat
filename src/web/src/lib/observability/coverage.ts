@@ -94,6 +94,7 @@ export const apiRoutes = [
   "/api/community/daemon/identity",
   "/api/community/daemon/resync-diagnostics",
   "/api/community/daemon/resync-wakes",
+  "/api/community/daemon/task-authority",
   "/api/community/diagnostics/[reportId]",
   "/api/community/friends/[id]",
   "/api/community/friends/[id]/accept",

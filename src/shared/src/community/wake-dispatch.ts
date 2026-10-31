@@ -2,6 +2,7 @@ import type { HostCommand, UnreadNotice } from "../community-cli-contract";
 import { makeRuntimeConfig } from "../runtime-config";
 import { resolveModelConfig } from "./bot-model";
 import { hasTaskAuthority } from "./task-authority";
+import { taskSourceForMessage } from "./task-source";
 import * as grant from "../db/queries/community/grant";
 import { formatHandle } from "../lib/discriminator";
 import { utcDayKey } from "../utils/day-key";
@@ -204,6 +205,8 @@ export async function buildUnreadWakeCommand(
   })) {
     return { state: "skip", reason: "no_task_authority" };
   }
+  const taskSource = taskSourceForMessage({ botOwnerUserId: botCtx.ownerUserId, message: msg, grants, nowMs });
+  if (!taskSource) return { state: "skip", reason: "no_task_authority" };
   const policyByUser = await notificationEligibility.resolveNotificationEligibilityForUsers(
     db,
     [input.botUserId],
@@ -248,6 +251,7 @@ export async function buildUnreadWakeCommand(
       messageId: msg.id,
     }),
     unreadNotice,
+    taskSource,
   };
 
   // Audit trail (best-effort) — commit that this wake fired for a specific

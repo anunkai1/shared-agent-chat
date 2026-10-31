@@ -194,6 +194,13 @@ export interface AgentMessage {
   readonly kind: "user" | "system" | "recovery";
   readonly text: string;
   readonly sequence?: number;
+  readonly authorization?: { readonly principal: string; readonly data: JsonObject };
+}
+
+export interface AgentExecutionPolicy {
+  authorize(message: AgentMessage): Promise<boolean>;
+  onActiveMessages?(messages: readonly AgentMessage[]): void;
+  readonly checkIntervalMs?: number;
 }
 
 export interface AgentDriverError {
@@ -564,6 +571,7 @@ export interface AgentSession<Specs, Id extends BackendId<Specs>> {
   start(message: AgentMessage): Promise<DeliveryReceipt>;
   send(message: AgentMessage): Promise<DeliveryReceipt>;
   interrupt(input: { readonly requestId: string; readonly reason: string }): Promise<InterruptResult>;
+  revalidateAuthorization?(): Promise<void>;
   updateSettings?(input: RuntimeSettingsUpdate): Promise<RuntimeSettingsUpdateResult>;
   stop(input: StopInput): Promise<StopReceipt>;
   snapshot(): AgentSessionSnapshot;
@@ -632,6 +640,7 @@ export type BackendProbe<Capabilities> =
     };
 
 export interface OpenSessionInput<Specs, Id extends BackendId<Specs>> {
+  readonly executionPolicy?: AgentExecutionPolicy;
   readonly backend: Id;
   readonly launch: AgentLaunchContext;
   readonly config: ConfigOf<Specs, Id>;

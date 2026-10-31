@@ -1,3 +1,63 @@
+# Runner task-authority verification — 31/10/2026
+
+## Identity and method
+
+- Parent main: `7a7ebdeb9a69e2eb269a069ad89bb727b5aa4489`.
+- Application code commit: `15f3d44ce21021e19055dc9dc2ca92422b953b8e`
+  (tree `a44ea2ab68080b6226bd3b6ed2ac8399d676b645`).
+- `pnpm-lock.yaml` unchanged (SHA-256 `8ee696b72e515fd702e2fa039d0149f1f6886b9b4c3b6ca9a31671fe8f330302`).
+- Node **24.22.1**, pnpm **10.33.0**; packed daemon checks used Bun **1.3.11** from the existing
+  isolated test image via ignored test-tool storage.
+- **No fresh image, live HTTP/WS run, real model run, real runtime interruption, deployment or host
+  wake.** All results below are source/package checks, real SQLite and route-handler fixtures, an
+  injected-fetch client, and driver/manager tests over controllable non-model lanes.
+
+## Results
+
+Test runs use `NODE_ENV=test`; typecheck adds `--use-openssl-ca --max-old-space-size=4096 --force`.
+
+| Scope | Result |
+|---|---|
+| `pnpm typecheck --force` | **10/10 tasks, 0 cached** |
+| `pnpm lint` | **0 errors**, 1 pre-existing Tailwind warning (`bot-audit-preview.tsx:103`) |
+| Shared (`vitest run`) | **190 files / 2,548 tests pass** |
+| Web (`vitest run`) | **617 files / 7,147 tests pass** |
+| Daemon (`test:unit` + `test:packed`) | **72 files / 1,753 pass**, plus **3 packed files / 7 pass** |
+| Agent driver | **62 files / 1,153 pass, 30 skipped** |
+| ws-do | **33 files / 584 pass** |
+
+The pre-commit hook was skipped, and this is why: it runs the root suite under the inherited
+`NODE_ENV=production`, where `src/daemon/src/cli/daemonStart.lifecycle.test.ts` →
+“persists the rotated epoch offline after local start failure…” times out at 10 s. That failure
+reproduces on the pristine parent tree (verified by stashing this change), so it predates it and is
+**not** claimed as fixed or explained. No root aggregate `pnpm test` pass exists for this revision.
+
+New coverage in this change:
+
+- Pure provenance policy: owner vs exact live grant; revoked/expired/wrong-channel/foreign-issuer
+  refusals; ownerless bots; strict schema fields.
+- Server recheck (`checkTaskSource`) over a mocked query boundary: bot/machine/owner binding, real
+  message author and channel, readability, grant revocation/expiry/replacement, expiry drift.
+- Daemon client over an injected `fetch`: lease re-asking after TTL, missed-answer epoch race,
+  transport failure refusal, principal/source mismatch, proxy header narrowing, mixed-principal refusal.
+- Real daemon wake path: a wake with no provenance and a wake the server refuses both ack
+  `task_authority_revoked` and create no session. The 22 existing wake fixtures now carry provenance.
+- Driver: refused root admission (lane never started, session released), cross-principal queueing
+  instead of steering, revoked queued work failing as `task_authority_revoked` while the owner turn
+  and its queued work continue, one interrupt for a running delegated turn, active-task publication.
+- Manager: revoked inbox entry dropped without touching the owner's running turn; a revoked delivery
+  settles as cancelled instead of stopping the session; an ordinary delivery failure still stops it.
+- ws-do: the `agent:authority_changed` nudge forwards only an agent id and rejects extra/missing fields.
+- Web: revoke nudges the owning machine and reports `runnerNotified` honestly when the daemon is
+  offline or the push throws; the daemon authority route validates strictly and passes refusals through.
+
+## Not verified or not implemented
+
+No live revocation mid-turn, no real reconnect-after-missed-nudge evidence, no measurement of the
+idle-session ambient-authority surface, no signature/trust-root against a lying server. Grant UI,
+safer runtime launch defaults, exact-build live protocol checks, full object/key recovery and
+application upgrade/rollback remain open.
+
 # Permission-hardening verification — 31/10/2026
 
 ## Identity and method

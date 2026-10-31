@@ -222,6 +222,7 @@ export type SessionFactory = (args: {
   runtimeConfig: RuntimeConfig;
 }) => DaemonAgentSession | Promise<DaemonAgentSession>;
 export interface ManagerRuntimeOpts {
+  authorizeMessage?: (agentId: string, message: AgentMsg) => Promise<boolean>;
   driverFor: (agentId: string, runtimeConfig?: RuntimeConfig) => { readonly id: BuiltinBackendId };
   baseContextFor: (agentId: string) => Omit<HostLaunchContext, "prompt" | "config" | "standingPrompt"> & {
     standingPrompt?: string;
@@ -482,6 +483,7 @@ export class AgentProcessManager {
     Omit<
       ManagerRuntimeOpts,
       | "sessionFactory"
+      | "authorizeMessage"
       | "now"
       | "credentialProxy"
       | "onAgentSession"
@@ -503,6 +505,7 @@ export class AgentProcessManager {
     Pick<
       ManagerRuntimeOpts,
       | "sessionFactory"
+      | "authorizeMessage"
       | "now"
       | "credentialProxy"
       | "onAgentSession"
@@ -702,6 +705,26 @@ export class AgentProcessManager {
     this.markResetting(agentId);
     await this.stop(agentId);
   }
+  private readonly authorizationChecks = new Map<string, Promise<void>>();
+
+  revalidateAuthorization(agentId: string): Promise<void> {
+    const existing = this.authorizationChecks.get(agentId);
+    if (existing) return existing;
+    const operation = (async () => {
+      const messages = this.state.agents[agentId]?.inbox ?? [];
+      if (this.opts.authorizeMessage) {
+        const denied = await Promise.all(messages.map(async message => {
+          try { return await this.opts.authorizeMessage!(agentId, message) ? null : message.id; }
+          catch { return message.id; }
+        }));
+        this.dispatch({ type: "cancel_deliveries", agentId, commandIds: denied.filter((id): id is string => typeof id === "string") });
+      }
+      await this.sessions.get(agentId)?.revalidateAuthorization?.();
+    })().finally(() => { this.authorizationChecks.delete(agentId); });
+    this.authorizationChecks.set(agentId, operation);
+    return operation;
+  }
+
   deliver(agentId: string, message: AgentMsg): boolean {
     if (this.shuttingDown) return false;
     const normalized = message.id
@@ -1277,6 +1300,7 @@ export class AgentProcessManager {
         kind: "user",
         text: this.stampNow(this.withFooter(message.text)),
         sequence: message.seq,
+        authorization: message.authorization,
       },
     };
   }
@@ -1335,7 +1359,7 @@ export class AgentProcessManager {
   private settlePendingDelivery(
     owner: ActiveSpawnState,
     commandId: string,
-    outcome: "accepted" | "failed" = "failed",
+    outcome: "accepted" | "failed" | "cancelled" = "failed",
   ): PendingDeliveryTrace | undefined {
     const pending = owner.pendingDeliverySpans.get(commandId);
     if (!pending) return undefined;
@@ -1395,6 +1419,10 @@ export class AgentProcessManager {
               || this.activeSpawnState.get(effect.agentId) !== exactOwner
             ) return;
             if (receipt.status === "rejected") {
+              if (receipt.error?.code === "task_authority_revoked") {
+                this.settlePendingDelivery(exactOwner, input.id, "cancelled");
+                return;
+              }
               if (!exactOwner.pendingDeliverySpans.has(input.id)) return;
               this.settlePendingDelivery(exactOwner, input.id);
               this.closeTurn(exactOwner, associatedSpan, {
@@ -2106,8 +2134,11 @@ export class AgentProcessManager {
     if (event.type === "command_queued") this.acknowledgePendingDelivery(owner, event.commandId);
     if (event.type === "command_accepted") this.settlePendingDelivery(owner, event.commandId, "accepted");
     if (event.type === "command_failed") {
-      const pending = this.settlePendingDelivery(owner, event.commandId);
-      if (pending && !sessionSuperseded && this.state.agents[agentId]?.status === "running") {
+      // A command the driver refused because its task authority is gone is
+      // CANCELLED, not a runtime fault: the owner's work must keep running.
+      const revoked = event.error.code === "task_authority_revoked";
+      const pending = this.settlePendingDelivery(owner, event.commandId, revoked ? "cancelled" : "failed");
+      if (!revoked && pending && !sessionSuperseded && this.state.agents[agentId]?.status === "running") {
         this.closeTurn(owner, pending.span, { event: "turn_abort", abortCause: "send_threw" });
         this.emitErrorAudit(agentId, "runtime", event.error.code, event.error.message);
         void owner.session?.stop({ reason: "shutdown", forceAfterMs: SESSION_STOP_GRACE_MS });

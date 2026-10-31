@@ -12,14 +12,31 @@ Conversation membership and task authority are separate. An owner can grant one 
 - Attachment downloads, thumbnails and attachment reuse require a membership-readable, task-authorised associated message for bots. An active uploader retains access to their own upload. Human membership rules remain in place.
 - Bot identity and covered policy reads start primary-consistent D1 sessions, rather than relying on lagging replicas after a revoke.
 - Grant requests are strictly validated; malformed scope is rejected, not widened. Grant listing reports `live`, not a misleading channel-independent `effective` value.
+- Every `agent:wake` carries a task source: the initiating message, its author, its channel, and either the owner or the exact grant that authorised it. The daemon refuses a wake with no provenance or whose probe is refused, before any session is created.
 
 These statements describe implemented paths and regression coverage, not a comprehensive security guarantee. See [project status](project/STATUS.md) for verification limits.
 
+## Runner-side authority enforcement
+
+Provenance travels with the work, not just with the conversation:
+
+- `POST /api/community/daemon/task-authority` rechecks a task source against the authenticated machine: bot binding and owner, the real message author and channel, bot readability, and — for delegated work — that the **same** grant id is still live and unexpired. A replacement grant cannot resurrect work done under an older one.
+- The daemon caches only positive decisions, for about one second, and drops them whenever the server signals `agent:authority_changed`. Refusals are never cached; a timeout, network error or malformed answer denies.
+- The driver authorises before root admission, again before the physical lane starts (after any asynchronous open), and at every safe-boundary or steering delivery. A periodic sweep rechecks queued, steering, safe-boundary and running work.
+- Revoked or expired queued work is dropped with `task_authority_revoked` and a running delegated turn is interrupted once. Owner work is never dropped, interrupted or requeued by this path, and a delegated message is never merged or steered into an owner turn.
+- The credential proxy stamps the initiating author on the child's own server calls and refuses them once the task's authority is gone, so a child cannot keep reading as the bot after its turn is revoked.
+
 ## Revocation limits — important
 
-Revocation updates the server grant row. Subsequent covered reads/wake decisions reject that grant; it does **not** recall bytes already delivered, clear runner queues, revalidate runner admission or interrupt executing delegated work. Those runner controls are not implemented. An in-flight read may already have taken its policy snapshot before a revoke.
+Revocation updates the server grant row, nudges the owning machine and is rechecked by the runner. It still does **not**:
 
-The runner still trusts server delivery. Honest-server admission/queue revalidation does not inherently need signatures. Resistance to a malicious hosting operator is a separate problem requiring an independently trusted owner-authority mechanism on the runner; it is not established here.
+- recall bytes already delivered or undo completed side effects, including tool calls, uploads, external requests or files written;
+- stop a runtime instantly. Interruption is a best-effort request at a boundary the driver can act on; a delegated turn can keep working until that boundary or until the process exits;
+- apply to a runner that is offline when the nudge is sent — it converges on reconnect or within roughly one lease of its own revalidation, not instantly;
+- remove the ambient authority of an idle kept-warm session. A child with no active task gets no narrowing header and retains the bot authority it always had; this change neither creates nor closes that surface;
+- protect against a server that lies to the runner. Signatures are not used: resistance to a malicious hosting operator needs an independently trusted owner-authority mechanism, which is not established here.
+
+An in-flight read may also have taken its policy snapshot before a revoke.
 
 Other limits:
 

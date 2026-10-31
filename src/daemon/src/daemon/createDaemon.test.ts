@@ -1,5 +1,5 @@
 import * as builtinDriverHost from "@alook/agent-driver/host";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { EventEmitter } from "events";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,6 +34,60 @@ import {
   type DaemonSelfSleepClock,
 } from "./daemonSelfSleep";
 import { createTimelineRecorder, readRecentEntries } from "../timeline/index.js";
+
+/**
+ * Task provenance every synthetic `agent:wake` in this file carries. A wake
+ * without one is refused by the daemon before it reaches the server, which is
+ * the property under test — not something these fixtures should trip over.
+ */
+const TASK_SOURCE = {
+  messageId: "msg_test",
+  authorUserId: "owner_test",
+  channelId: "ch_test",
+  grantId: null,
+  expiresAt: null,
+} as const;
+
+/**
+ * Every `fetch` stub in this file answers the daemon's task-authority recheck
+ * with this decision. Tests that need a refusal (or a smaller lease) set it
+ * around their own scenario via `setTaskAuthorityDecision`.
+ */
+let taskAuthorityDecision: () => Response = () =>
+  Response.json({ allowed: true, ownerUserId: "owner_test", validForMs: 1_000 });
+function setTaskAuthorityDecision(decision: () => Response): void {
+  taskAuthorityDecision = decision;
+}
+
+/**
+ * Route every `fetch` stub in this file through the task-authority decision.
+ * Tests install stubs with both `vi.stubGlobal("fetch", …)` and
+ * `global.fetch = …`; intercepting the property covers either form, so the
+ * daemon's own authority recheck always has an answer.
+ */
+const wrapFetch = (value: unknown): typeof fetch => {
+  if (typeof value !== "function") return value as typeof fetch;
+  const inner = value as typeof fetch;
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input).includes("/api/community/daemon/task-authority")) return taskAuthorityDecision();
+    return inner(input, init);
+  }) as typeof fetch;
+};
+
+// `vi.stubGlobal` may define rather than assign, which would bypass a property
+// accessor — so wrap that call too. Between the two, every fetch a test installs
+// answers the daemon's authority recheck.
+const realStubGlobal = vi.stubGlobal.bind(vi);
+vi.stubGlobal = ((name: string, value: unknown) =>
+  name === "fetch" ? realStubGlobal(name, wrapFetch(value)) : realStubGlobal(name, value)) as typeof vi.stubGlobal;
+
+const nativeFetch = globalThis.fetch;
+let activeFetch: typeof fetch | undefined;
+Object.defineProperty(globalThis, "fetch", {
+  configurable: true,
+  get: () => activeFetch ?? nativeFetch,
+  set: (value: unknown) => { activeFetch = wrapFetch(value); },
+});
 
 const timelineSweepHarness = vi.hoisted(() => {
   let implementation: (workingDirectoryBase: string) => Promise<unknown> =
@@ -128,6 +182,9 @@ vi.mock("../credentials/index.js", async (importOriginal) => {
 });
 
 const startupSweepDirs: string[] = [];
+beforeEach(() => {
+  taskAuthorityDecision = () => Response.json({ allowed: true, ownerUserId: "owner_test", validForMs: 1_000 });
+});
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -475,6 +532,7 @@ describe("createDaemon", () => {
         agentId,
         config: { version: 1, runtime, model: { kind: "default" }, mode: { kind: "default" } },
         launchId: `launch_${agentId}`,
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq },
       }));
     };
@@ -559,6 +617,7 @@ describe("createDaemon", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: backendId, model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }));
       await vi.waitFor(() => expect(sessions).toHaveLength(1));
@@ -693,6 +752,7 @@ describe("createDaemon", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: backendId, model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_pi",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }));
       await vi.waitFor(() => expect(sessions).toHaveLength(1));
@@ -775,6 +835,7 @@ describe("createDaemon", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_telemetry_failure",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }));
       await vi.waitFor(() => expect(sessions).toHaveLength(1));
@@ -926,6 +987,63 @@ for await (const line of createInterface({ input: process.stdin })) {
     }
   }, 30_000);
 
+  it("refuses a wake that carries no task provenance, and one the server withdraws", async () => {
+    const sockets: FakeSocket[] = [];
+    const sessions: DaemonFakeSession[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes("/enroll-agent")) return Response.json({ runnerKey: "runner_test" });
+      return Response.json({ bots: [{ id: "bot_1", name: "Bot", discriminator: "0001" }] });
+    }));
+    const daemon = await createDaemon({
+      machineKey: "cmk_task_provenance",
+      serverUrl: "http://server.invalid",
+      serverWsUrl: "ws://x",
+      webSocketFactory: factory(sockets) as never,
+      runtimeReport: [{ id: "codex" }],
+      driverFor: () => fullFakeDriver("codex"),
+      sessionFactory: () => {
+        const session = daemonFakeSession();
+        sessions.push(session);
+        return session;
+      },
+      capabilities: [],
+    });
+    const wake = (launchId: string, extra: Record<string, unknown>) => sockets[0]!.emit("message", JSON.stringify({
+      type: "agent:wake",
+      agentId: "bot_1",
+      config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
+      launchId,
+      unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
+      ...extra,
+    }));
+    const ack = (launchId: string) => sockets[0]!.sent
+      .map((frame) => JSON.parse(frame) as Record<string, unknown>)
+      .find((frame) => frame.type === "agent_wake_ack" && frame.launchId === launchId);
+
+    try {
+      sockets[0]!.emit("open");
+      await vi.waitFor(() => expect(daemon.isOpen()).toBe(true));
+
+      wake("launch_bare", {});
+      await vi.waitFor(() => expect(ack("launch_bare")).toMatchObject({
+        status: "error",
+        error: { code: "task_authority_revoked" },
+      }));
+
+      setTaskAuthorityDecision(() => Response.json({ allowed: false }));
+      wake("launch_denied", { taskSource: TASK_SOURCE });
+      await vi.waitFor(() => expect(ack("launch_denied")).toMatchObject({
+        status: "error",
+        error: { code: "task_authority_revoked" },
+      }));
+
+      // Neither refusal reached a driver: no session was ever created.
+      expect(sessions).toHaveLength(0);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
   it("routes local reminder expiry through the manager and cancels on exact-scope wake/stop/removal/daemon stop", async () => {
     const realFetch = globalThis.fetch;
     const sockets: FakeSocket[] = [];
@@ -1000,6 +1118,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         agentId: "bot_1",
         config: { version: 1, runtime: "mock", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }));
       await vi.waitFor(() => expect(wakeAcked("launch_1")).toBe(true));
@@ -1023,6 +1142,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         agentId: "bot_1",
         config: { version: 1, runtime: "mock", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_2",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 11 },
       }));
       await vi.waitFor(() => expect(wakeAcked("launch_2")).toBe(true));
@@ -1036,6 +1156,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         agentId: "bot_1",
         config: { version: 1, runtime: "mock", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_duplicate",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 11 },
       }));
       await vi.waitFor(() => expect(wakeAcked("launch_duplicate")).toBe(true));
@@ -1128,6 +1249,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       agentId: "bot_1",
       config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
       launchId: `launch_${seq}`,
+      taskSource: TASK_SOURCE,
       unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: seq },
     }));
     const sentFrames = () => sockets[0]!.sent.map((frame) => JSON.parse(frame) as Record<string, unknown>);
@@ -1348,6 +1470,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       agentId,
       config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
       launchId: `launch_${latestSeq}`,
+      taskSource: TASK_SOURCE,
       unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq },
     }));
 
@@ -1435,6 +1558,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_deferred",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }));
       await vi.advanceTimersByTimeAsync(1);
@@ -1892,6 +2016,7 @@ describe("createDaemon — terminal usage shutdown contract", () => {
       agentId,
       config: { version: 1, runtime: "antigravity", model: { kind: "default" }, mode: { kind: "default" } },
       launchId: "launch_terminal",
+      taskSource: TASK_SOURCE,
       unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
     }));
     return { daemon, sockets, sessions, logger, workingDirectoryBase, wake };
@@ -2252,6 +2377,7 @@ describe("createDaemon — logging", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "l1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }),
     );
@@ -2302,6 +2428,7 @@ describe("createDaemon — logging", () => {
       agentId: "bot_working",
       config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
       launchId: `launch_${seq}`,
+      taskSource: TASK_SOURCE,
       unreadNotice: { kind: "unread_notice", channel, latestSeq: seq },
     }));
     const wakeAcked = (seq: number) => sockets[0].sent.map((frame) => JSON.parse(frame)).some(
@@ -2400,6 +2527,7 @@ describe("createDaemon — logging", () => {
       agentId: "bot_replay",
       config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
       launchId,
+      taskSource: TASK_SOURCE,
       unreadNotice: { kind: "unread_notice", channel, latestSeq },
     }));
     const wakeAcked = (launchId: string) => sockets[0].sent.map((frame) => JSON.parse(frame)).some(
@@ -2507,6 +2635,7 @@ describe("createDaemon — logging", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "launch_1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }));
       await vi.waitFor(() => expect(session).toBeDefined());
@@ -2584,6 +2713,7 @@ describe("createDaemon — logging", () => {
             agentId: "bot_retry",
             config: { version: 1, runtime: "cursor", model: { kind: "default" }, mode: { kind: "default" } },
             launchId,
+            taskSource: TASK_SOURCE,
             unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq },
           }),
         );
@@ -2655,6 +2785,7 @@ describe("createDaemon — logging", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "l1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }),
     );
@@ -2715,6 +2846,7 @@ describe("createDaemon — logging", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "l1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }),
     );
@@ -2742,6 +2874,7 @@ describe("createDaemon — logging", () => {
         agentId: "bot_2",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "l2",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 2 },
       }),
     );
@@ -2861,6 +2994,7 @@ describe("createDaemon — logging", () => {
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "l1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }),
     );
@@ -2901,6 +3035,7 @@ describe("createDaemon — logging", () => {
         agentId: "bot_text",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "l_text",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }),
     );
@@ -3049,6 +3184,7 @@ describe("createDaemon — level-triggered activity heartbeat (2b: live-connecti
         agentId: "bot_1",
         config: { version: 1, runtime: "codex", model: { kind: "default" }, mode: { kind: "default" } },
         launchId: "l1",
+        taskSource: TASK_SOURCE,
         unreadNotice: { kind: "unread_notice", channel: "/demo#1234/general", latestSeq: 1 },
       }),
     );

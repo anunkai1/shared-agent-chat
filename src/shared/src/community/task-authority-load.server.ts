@@ -9,6 +9,7 @@ export async function loadTaskAuthorityForBot(
     botOwnerUserId: string | null;
     authorIds?: readonly (string | null | undefined)[];
     nowMs?: number;
+    onlyAuthorUserId?: string;
   }
 ): Promise<TaskAuthorityCheck> {
   const nowMs = input.nowMs ?? Date.now();
@@ -20,5 +21,10 @@ export async function loadTaskAuthorityForBot(
   const grants = needsGrants
     ? await listActiveGrantsForBot(db, input.botUserId, new Date(nowMs).toISOString())
     : [];
-  return createTaskAuthority({ botOwnerUserId: input.botOwnerUserId, grants, nowMs });
+  const policy = createTaskAuthority({ botOwnerUserId: input.botOwnerUserId, grants, nowMs });
+  return {
+    ownerUserId: policy.ownerUserId,
+    mayTask: (authorId, channelId) =>
+      (input.onlyAuthorUserId === undefined || input.onlyAuthorUserId === authorId) && policy.mayTask(authorId, channelId),
+  };
 }

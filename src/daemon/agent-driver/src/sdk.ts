@@ -191,6 +191,7 @@ export function createAgentDriverSdkWithRegistry<Specs>(
         host,
         prepared.resource,
         hostReleaseTimeoutMs,
+        input.executionPolicy,
       );
       return { ok: true, session, capabilities: registration.capabilities };
     },
